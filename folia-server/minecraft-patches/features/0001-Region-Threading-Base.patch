@@ -12755,7 +12755,7 @@ index 11fed81a4696ba18440e755c3b8a5ca39ed8a6b1..45d6a95196a791d366791e02d23c53b8
  
      public boolean isOldChunkAround(ChunkPos pos, int radius) {
 diff --git a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
-index 08c59d603fca038fc2dde36384eea1b6c971e659..714813cba67da4a737682fe9276cb0d96fea336d 100644
+index f02800e4e941b05bde6f0d5fac76e2b6ec5b9832..8150b16c196edcb226be9268ea6e0012e44517fa 100644
 --- a/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerCommonPacketListenerImpl.java
 @@ -85,8 +85,19 @@ public abstract class ServerCommonPacketListenerImpl implements ServerCommonPack
@@ -16410,7 +16410,7 @@ index 73ec34b43f3fb2aa3edc3f1cb48a923d1fa32036..07dd05ceb9700e91088326290d211d94
                          if (chicken instanceof Chicken realChicken) {
                              Optional.ofNullable(this.getItem().get(DataComponents.CHICKEN_VARIANT))
 diff --git a/net/minecraft/world/entity/projectile/ThrownEnderpearl.java b/net/minecraft/world/entity/projectile/ThrownEnderpearl.java
-index 4b04ca7d50d7a85827bd89fff24434e603e99579..bded685ed1653e9a1e2d7d4a9c4f68da58a6b06e 100644
+index 5aa63c90e1c0605faef76588efdc7c3903be4605..a2b3a744acca66c1d4b2b73512b69e411c2580e4 100644
 --- a/net/minecraft/world/entity/projectile/ThrownEnderpearl.java
 +++ b/net/minecraft/world/entity/projectile/ThrownEnderpearl.java
 @@ -52,15 +52,11 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
@@ -16534,7 +16534,7 @@ index 4b04ca7d50d7a85827bd89fff24434e603e99579..bded685ed1653e9a1e2d7d4a9c4f68da
              Entity owner = this.getOwner();
              if (owner != null && isAllowedToTeleportOwner(owner, serverLevel)) {
                  Vec3 vec3 = this.oldPosition();
-@@ -205,7 +290,15 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+@@ -208,7 +293,15 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
          }
      }
  
@@ -19070,7 +19070,7 @@ index e04d3479383cd480cf35ed7ac3c82e7f6fb69e28..b80433ebfd9a7a50eccaa4b4905f7913
                  .map(list3 -> list3 != null ? new ShortArrayList(list3) : null)
                  .toArray(ShortList[]::new);
 diff --git a/net/minecraft/world/level/dimension/end/EndDragonFight.java b/net/minecraft/world/level/dimension/end/EndDragonFight.java
-index 8ccd40c70e150bd5a8d89818c229258642f2349e..4fa8371c212dcc02b8cf5fd267b736e1cf3f50c1 100644
+index 7f9bd256da15da915db1c45099572d9eb3286166..23072c9ced73311954863592b0458c9662a551aa 100644
 --- a/net/minecraft/world/level/dimension/end/EndDragonFight.java
 +++ b/net/minecraft/world/level/dimension/end/EndDragonFight.java
 @@ -76,7 +76,7 @@ public class EndDragonFight {
@@ -19188,7 +19188,7 @@ index c2e37714bae008087b0b5086e51d675beb672ca4..4b8b71f07096b27f3508b637eedcf2be
  
                      if (days >= level.paperConfig().entities.behavior.pillagerPatrols.start.day && level.isBrightOutside()) {
 diff --git a/net/minecraft/world/level/levelgen/PhantomSpawner.java b/net/minecraft/world/level/levelgen/PhantomSpawner.java
-index d2e674b046bcf82a239b4706c3b89197ec6749c8..0cafe46e9a1b053c5e70f20a26b4402632d0f8bf 100644
+index b3cfab9c82fe12694f5d2f56bd922828e51df680..ecfd6a04ea1bac75bbb7e88554b73fc67e7f7358 100644
 --- a/net/minecraft/world/level/levelgen/PhantomSpawner.java
 +++ b/net/minecraft/world/level/levelgen/PhantomSpawner.java
 @@ -19,7 +19,7 @@ import net.minecraft.world.level.block.state.BlockState;
