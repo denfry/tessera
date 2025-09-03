@@ -2033,10 +2033,10 @@ index 0000000000000000000000000000000000000000..e1842ab8f20271a8b20ab8462b09a474
 \ No newline at end of file
 diff --git a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..2147f3647d47e9a45e0e3017026523ee0f355e48
+index 0000000000000000000000000000000000000000..25a0b1d56652e4455a188d0f413581638d5ef538
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
-@@ -0,0 +1,808 @@
+@@ -0,0 +1,816 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
@@ -2060,7 +2060,7 @@ index 0000000000000000000000000000000000000000..2147f3647d47e9a45e0e3017026523ee
 +
 +public final class RegionizedTaskQueue {
 +
-+    private static final TicketType<Unit> TASK_QUEUE_TICKET = ChunkSystemTicketType.create("task_queue_ticket", (a, b) -> 0);
++    private static final TicketType<Long> TASK_QUEUE_TICKET = ChunkSystemTicketType.create("task_queue_ticket", Long::compareTo);
 +
 +    public PrioritisedExecutor.PrioritisedTask createChunkTask(final ServerLevel world, final int chunkX, final int chunkZ,
 +                                                               final Runnable run) {
@@ -2147,15 +2147,15 @@ index 0000000000000000000000000000000000000000..2147f3647d47e9a45e0e3017026523ee
 +            return (isChunkTask ? taskQueueData.chunkQueue : taskQueueData.tickTaskQueue);
 +        }
 +
-+        private void removeTicket(final long coord) {
++        private void removeTicket(final long coord, final long id) {
 +            this.world.moonrise$getChunkTaskScheduler().chunkHolderManager.removeTicketAtLevel(
-+                TASK_QUEUE_TICKET, coord, ChunkHolderManager.MAX_TICKET_LEVEL, Unit.INSTANCE
++                TASK_QUEUE_TICKET, coord, ChunkHolderManager.MAX_TICKET_LEVEL, Long.valueOf(id)
 +            );
 +        }
 +
-+        private void addTicket(final long coord) {
++        private void addTicket(final long coord, final long id) {
 +            this.world.moonrise$getChunkTaskScheduler().chunkHolderManager.addTicketAtLevel(
-+                TASK_QUEUE_TICKET, coord, ChunkHolderManager.MAX_TICKET_LEVEL, Unit.INSTANCE
++                TASK_QUEUE_TICKET, coord, ChunkHolderManager.MAX_TICKET_LEVEL, Long.valueOf(id)
 +            );
 +        }
 +
@@ -2167,7 +2167,7 @@ index 0000000000000000000000000000000000000000..2147f3647d47e9a45e0e3017026523ee
 +        private void ensureTicketAdded(final long coord, final ReferenceCountData referenceCountData) {
 +            if (!referenceCountData.addedTicket) {
 +                // fine if multiple threads do this, no removeTicket may be called for this coord due to reference count inc
-+                this.addTicket(coord);
++                this.addTicket(coord, referenceCountData.id);
 +                this.processTicketUpdates(coord);
 +                referenceCountData.addedTicket = true;
 +            }
@@ -2178,6 +2178,8 @@ index 0000000000000000000000000000000000000000..2147f3647d47e9a45e0e3017026523ee
 +                return;
 +            } // else: need to remove ticket
 +
++            final ReferenceCountData[] toRemoveTicket = new ReferenceCountData[1];
++
 +            // note: it is possible that another thread increments and then removes the reference before we can, so
 +            //       use ifPresent
 +            this.referenceCounters.computeIfPresent(coord, (final long keyInMap, final ReferenceCountData valueInMap) -> {
@@ -2186,12 +2188,14 @@ index 0000000000000000000000000000000000000000..2147f3647d47e9a45e0e3017026523ee
 +                }
 +
 +                // note: valueInMap may not be referenceCountData
-+
-+                // possible to invoke this outside of the compute call, but not required and requires additional logic
-+                WorldRegionTaskData.this.removeTicket(keyInMap);
++                toRemoveTicket[0] = valueInMap;
 +
 +                return null;
 +            });
++
++            if (toRemoveTicket[0] != null) {
++                this.removeTicket(coord, toRemoveTicket[0].id);
++            }
 +        }
 +
 +        private ReferenceCountData incrementReference(final long coord) {
@@ -2220,6 +2224,10 @@ index 0000000000000000000000000000000000000000..2147f3647d47e9a45e0e3017026523ee
 +    }
 +
 +    private static final class ReferenceCountData {
++
++        private static final AtomicLong ID_GENERATOR = new AtomicLong();
++
++        private final long id = ID_GENERATOR.getAndIncrement();
 +
 +        public final AtomicLong referenceCount = new AtomicLong(1L);
 +        public volatile boolean addedTicket;
