@@ -1,17 +1,14 @@
-From 9b0b577545490cc51788ea9d5c35df384482938d Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Euphyllia Bierque <bierque.euphyllia@gmail.com>
 Date: Tue, 28 Jan 2025 16:35:13 -0800
-Subject: [PATCH 7/7] Add TPS From Region
+Subject: [PATCH] Add TPS From Region
 
----
- .../org/bukkit/craftbukkit/CraftServer.java   | 65 +++++++++++++++++++
- 1 file changed, 65 insertions(+)
 
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index 53c8009cd..a97f7345f 100644
+index 51b54104eb70f64a548f37eeab1a444678fafc8b..e0074e5b3446b8c7a188b3f5307b945765de5c71 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-@@ -3253,4 +3253,69 @@ public final class CraftServer implements Server {
+@@ -3034,4 +3034,69 @@ public final class CraftServer implements Server {
      public void allowPausing(final Plugin plugin, final boolean value) {
          this.console.addPluginAllowingSleep(plugin.getName(), value);
      }
@@ -81,6 +78,3 @@ index 53c8009cd..a97f7345f 100644
 +    }
 +    // Folia end - region TPS API
  }
--- 
-2.52.0.windows.1
-

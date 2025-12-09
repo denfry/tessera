@@ -1,11 +1,8 @@
-From 4583378c731f0193ae7ecf599f1b68877abb492e Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Fri, 20 Dec 2024 12:41:13 -0800
-Subject: [PATCH 2/7] Update Logo
+Subject: [PATCH] Update Logo
 
----
- src/main/resources/logo.png | Bin 16900 -> 36428 bytes
- 1 file changed, 0 insertions(+), 0 deletions(-)
 
 diff --git a/src/main/resources/logo.png b/src/main/resources/logo.png
 index 8b924977b7886df9ab8790b1e4ff9b1c04a2af45..c06126b92e36566c93b901637926703bbfcc42ff 100644
@@ -1037,7 +1034,4 @@ z``4jh8^vb#=_?9Hh_)q6T)5{?KdaF@G)h>I!IS>M^uNpl#N|wC@HMBcRTMT#SL;d7
 z<(&BuA6dLkkx|8fWw@PXzCeCBgDx@HJs@)L+j8y~gZ<df6K`wk{>)7)${p-|O7{G?
 z&|M6FI|A*^d_U+Of-3`+w(c~-YsQby|NH)g|G7xv|Nek^|Jex)g~z+)I0xPC0460S
 LFIp>X81%mY^Bg|U
-
--- 
-2.52.0.windows.1
 
