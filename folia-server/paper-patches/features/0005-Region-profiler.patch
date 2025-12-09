@@ -1,7 +1,7 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 1d35b8649d80bab191b33d1a1c0d34b9e2da2ba4 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Tue, 3 Oct 2023 06:03:34 -0700
-Subject: [PATCH] Region profiler
+Subject: [PATCH 5/7] Region profiler
 
 Profiling for a region starts with the /profiler command.
 The usage for /profiler:
@@ -75,9 +75,12 @@ Counters are specified as follows:
 The X is the average number of times the counter is invoked
 relative to the parent, exactly similar to the D field of Timers,
 where Y is the total number of times the counter is invoked.
+---
+ src/main/java/io/papermc/paper/command/PaperCommands.java | 1 +
+ 1 file changed, 1 insertion(+)
 
 diff --git a/src/main/java/io/papermc/paper/command/PaperCommands.java b/src/main/java/io/papermc/paper/command/PaperCommands.java
-index b2da36202e59dfa23165528145d0fe08bb3966fb..4ccc2ce3743c260a86b27e951979eb8d5d5ae1db 100644
+index cf9996228..3deca0b4e 100644
 --- a/src/main/java/io/papermc/paper/command/PaperCommands.java
 +++ b/src/main/java/io/papermc/paper/command/PaperCommands.java
 @@ -25,6 +25,7 @@ public final class PaperCommands {
@@ -88,3 +91,6 @@ index b2da36202e59dfa23165528145d0fe08bb3966fb..4ccc2ce3743c260a86b27e951979eb8d
  
          COMMANDS.forEach((s, command) -> {
              server.server.getCommandMap().register(s, "Paper", command);
+-- 
+2.52.0.windows.1
+

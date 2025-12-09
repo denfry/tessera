@@ -1,12 +1,15 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 508ca2bdd7719e7a4fde06e8093b87337cb2408d Mon Sep 17 00:00:00 2001
 From: Nassim Jahnke <nassim@njahnke.dev>
 Date: Sat, 25 Mar 2023 19:03:42 +0100
-Subject: [PATCH] Fix tests by removing them
+Subject: [PATCH 4/7] Fix tests by removing them
 
 We don't care about this one, some commands just need to be removed.
+---
+ .../paper/permissions/MinecraftCommandPermissionsTest.java       | 1 +
+ 1 file changed, 1 insertion(+)
 
 diff --git a/src/test/java/io/papermc/paper/permissions/MinecraftCommandPermissionsTest.java b/src/test/java/io/papermc/paper/permissions/MinecraftCommandPermissionsTest.java
-index fe08e446e86d53cef6eecc33cd484e93adc42871..e374c240a9dadb52933272a09569c60bf86289a2 100644
+index fe08e446e..e374c240a 100644
 --- a/src/test/java/io/papermc/paper/permissions/MinecraftCommandPermissionsTest.java
 +++ b/src/test/java/io/papermc/paper/permissions/MinecraftCommandPermissionsTest.java
 @@ -37,6 +37,7 @@ public class MinecraftCommandPermissionsTest {
@@ -17,3 +20,6 @@ index fe08e446e86d53cef6eecc33cd484e93adc42871..e374c240a9dadb52933272a09569c60b
          CraftDefaultPermissions.registerCorePermissions();
          Set<String> perms = collectMinecraftCommandPerms();
  
+-- 
+2.52.0.windows.1
+

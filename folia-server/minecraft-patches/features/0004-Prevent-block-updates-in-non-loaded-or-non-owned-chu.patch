@@ -1,15 +1,22 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 068f12eb799361f765301aab947d785b639ecc30 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Mon, 17 Apr 2023 19:47:57 -0700
-Subject: [PATCH] Prevent block updates in non-loaded or non-owned chunks
+Subject: [PATCH 4/8] Prevent block updates in non-loaded or non-owned chunks
 
 This is to prevent block physics from tripping thread checks by
 far exceeding the bounds of the current region. While this does
 add explicit block update suppression techniques, it's better
 than the server crashing.
+---
+ net/minecraft/world/level/Level.java                   |  2 +-
+ net/minecraft/world/level/block/DetectorRailBlock.java |  4 ++--
+ net/minecraft/world/level/block/PoweredRailBlock.java  |  4 ++--
+ net/minecraft/world/level/block/RedStoneWireBlock.java |  3 ++-
+ .../level/redstone/CollectingNeighborUpdater.java      | 10 +++++++---
+ 5 files changed, 14 insertions(+), 9 deletions(-)
 
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index 402a90890b9754c9c1a1d209a13cda8c9498f05c..1976a443e7c59e1e18d8a411513df39c83ad1095 100644
+index 8b60d3c..2acf7bb 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
 @@ -2045,7 +2045,7 @@ public abstract class Level implements LevelAccessor, UUIDLookup<Entity>, AutoCl
@@ -22,7 +29,7 @@ index 402a90890b9754c9c1a1d209a13cda8c9498f05c..1976a443e7c59e1e18d8a411513df39c
                  if (blockState.is(Blocks.COMPARATOR)) {
                      this.neighborChanged(blockState, blockPos, block, null, false);
 diff --git a/net/minecraft/world/level/block/DetectorRailBlock.java b/net/minecraft/world/level/block/DetectorRailBlock.java
-index 73bc347616b40f55664dfcbc805dfac5d1e0452e..ec273a242c67d13906d543831e0cd5def2cae931 100644
+index 73bc347..ec273a2 100644
 --- a/net/minecraft/world/level/block/DetectorRailBlock.java
 +++ b/net/minecraft/world/level/block/DetectorRailBlock.java
 @@ -128,8 +128,8 @@ public class DetectorRailBlock extends BaseRailBlock {
@@ -37,7 +44,7 @@ index 73bc347616b40f55664dfcbc805dfac5d1e0452e..ec273a242c67d13906d543831e0cd5de
      }
  
 diff --git a/net/minecraft/world/level/block/PoweredRailBlock.java b/net/minecraft/world/level/block/PoweredRailBlock.java
-index e4c4a6b4a6ea41b1fdb006cfc70dfb68dcd056c0..abc39a31b29ed4f68398851de7a1209fef895769 100644
+index e4c4a6b..abc39a3 100644
 --- a/net/minecraft/world/level/block/PoweredRailBlock.java
 +++ b/net/minecraft/world/level/block/PoweredRailBlock.java
 @@ -102,8 +102,8 @@ public class PoweredRailBlock extends BaseRailBlock {
@@ -52,7 +59,7 @@ index e4c4a6b4a6ea41b1fdb006cfc70dfb68dcd056c0..abc39a31b29ed4f68398851de7a1209f
          } else {
              RailShape railShape = blockState.getValue(SHAPE);
 diff --git a/net/minecraft/world/level/block/RedStoneWireBlock.java b/net/minecraft/world/level/block/RedStoneWireBlock.java
-index fde784fac9ee933d811d70701cb71684c816e966..4b37335e91a51b9a58ce0bce94b61ab5afbc6486 100644
+index fde784f..4b37335 100644
 --- a/net/minecraft/world/level/block/RedStoneWireBlock.java
 +++ b/net/minecraft/world/level/block/RedStoneWireBlock.java
 @@ -211,8 +211,9 @@ public class RedStoneWireBlock extends Block {
@@ -67,7 +74,7 @@ index fde784fac9ee933d811d70701cb71684c816e966..4b37335e91a51b9a58ce0bce94b61ab5
                  BlockState blockState = level.getBlockState(mutableBlockPos);
                  if (blockState.is(this)) {
 diff --git a/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java b/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
-index e7ea9df8f404a6176435204a91edeefab8070c89..285fa83ee583595274f228e5981a67f67012d410 100644
+index e7ea9df..285fa83 100644
 --- a/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
 +++ b/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
 @@ -122,7 +122,8 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
@@ -109,3 +116,6 @@ index e7ea9df8f404a6176435204a91edeefab8070c89..285fa83ee583595274f228e5981a67f6
              return false;
          }
      }
+-- 
+2.52.0.windows.1
+

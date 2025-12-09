@@ -1,13 +1,16 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 92ebed132f15ec6f7e8fc7764e7df2990770aa90 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Sun, 23 Apr 2023 07:08:26 -0700
-Subject: [PATCH] Block reading in-world tile entities on worldgen threads
+Subject: [PATCH 5/8] Block reading in-world tile entities on worldgen threads
 
 The returned TE may be in the world, in which case it is unsafe
 for the current thread to modify or access its contents.
+---
+ net/minecraft/world/level/chunk/ImposterProtoChunk.java | 5 +++++
+ 1 file changed, 5 insertions(+)
 
 diff --git a/net/minecraft/world/level/chunk/ImposterProtoChunk.java b/net/minecraft/world/level/chunk/ImposterProtoChunk.java
-index d1331b580b3d27c77244b22a4ad15e719f686c8f..b430bb3c1bca935312bf6183b9f502c683b27c1f 100644
+index d1331b5..b430bb3 100644
 --- a/net/minecraft/world/level/chunk/ImposterProtoChunk.java
 +++ b/net/minecraft/world/level/chunk/ImposterProtoChunk.java
 @@ -91,6 +91,11 @@ public class ImposterProtoChunk extends ProtoChunk implements ca.spottedleaf.moo
@@ -22,3 +25,6 @@ index d1331b580b3d27c77244b22a4ad15e719f686c8f..b430bb3c1bca935312bf6183b9f502c6
          return this.wrapped.getBlockEntity(pos);
      }
  
+-- 
+2.52.0.windows.1
+

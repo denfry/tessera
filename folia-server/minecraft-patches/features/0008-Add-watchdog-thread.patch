@@ -1,14 +1,20 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 022af2ed13ce21c7d5fd4e155dac934990909119 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Fri, 30 Aug 2024 18:34:32 -0700
-Subject: [PATCH] Add watchdog thread
+Subject: [PATCH 8/8] Add watchdog thread
 
 When regions take too long, having the server print the stacktrace
 of the ticking region should help debug the cause.
+---
+ .../threadedregions/FoliaWatchdogThread.java  | 104 ++++++++++++++++++
+ .../threadedregions/TickRegionScheduler.java  |  13 +++
+ .../paper/threadedregions/TickRegions.java    |   4 +-
+ 3 files changed, 119 insertions(+), 2 deletions(-)
+ create mode 100644 io/papermc/paper/threadedregions/FoliaWatchdogThread.java
 
 diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..e9ca1a15049b0211d10401cb78e953b93afaf6c7
+index 0000000..e9ca1a1
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
 @@ -0,0 +1,104 @@
@@ -117,7 +123,7 @@ index 0000000000000000000000000000000000000000..e9ca1a15049b0211d10401cb78e953b9
 +    }
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-index e392457ccc06d3c6ad794f3c480d301a46083054..fa6b8d756195c1b430cc11214a901bd42eebc98d 100644
+index e392457..fa6b8d7 100644
 --- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 @@ -34,6 +34,13 @@ public final class TickRegionScheduler {
@@ -169,7 +175,7 @@ index e392457ccc06d3c6ad794f3c480d301a46083054..fa6b8d756195c1b430cc11214a901bd4
                  final long cpuEnd = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
  
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index b1c07e582dbf0a203cf734fdbcd8387a422af3a6..988fe74578065c9464f5639e5cc6af79619edef5 100644
+index b1c07e5..988fe74 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
 @@ -330,9 +330,9 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
@@ -184,3 +190,6 @@ index b1c07e582dbf0a203cf734fdbcd8387a422af3a6..988fe74578065c9464f5639e5cc6af79
  
          private ConcreteRegionTickHandle(final TickRegionData region, final long start) {
              super(region, start);
+-- 
+2.52.0.windows.1
+

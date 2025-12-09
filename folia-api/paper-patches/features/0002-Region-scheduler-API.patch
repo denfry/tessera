@@ -1,13 +1,17 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 866289ab3d37cb89f84825e17865d425b9a0cd71 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Sat, 4 Mar 2023 12:48:43 -0800
-Subject: [PATCH] Region scheduler API
+Subject: [PATCH 2/4] Region scheduler API
 
 Add both a location based scheduler, an entity based scheduler,
 and a global region scheduler.
+---
+ src/main/java/org/bukkit/plugin/SimplePluginManager.java | 4 ++--
+ src/main/java/org/bukkit/scheduler/BukkitScheduler.java  | 9 +++++++++
+ 2 files changed, 11 insertions(+), 2 deletions(-)
 
 diff --git a/src/main/java/org/bukkit/plugin/SimplePluginManager.java b/src/main/java/org/bukkit/plugin/SimplePluginManager.java
-index 001465eedafa51ac027a4db51cba6223edfe1171..468f5646da7bc413a6e91e82379e6554cc8b459d 100644
+index dfc2d7640..d1f1e5adb 100644
 --- a/src/main/java/org/bukkit/plugin/SimplePluginManager.java
 +++ b/src/main/java/org/bukkit/plugin/SimplePluginManager.java
 @@ -557,9 +557,9 @@ public final class SimplePluginManager implements PluginManager {
@@ -23,7 +27,7 @@ index 001465eedafa51ac027a4db51cba6223edfe1171..468f5646da7bc413a6e91e82379e6554
              }
  
 diff --git a/src/main/java/org/bukkit/scheduler/BukkitScheduler.java b/src/main/java/org/bukkit/scheduler/BukkitScheduler.java
-index 5c277ac7a61df8106f7c13a1ad8ccb1509338699..446c115f19c4dde0d5e269f8d120bc51ad3898e0 100644
+index 5c277ac7a..446c115f1 100644
 --- a/src/main/java/org/bukkit/scheduler/BukkitScheduler.java
 +++ b/src/main/java/org/bukkit/scheduler/BukkitScheduler.java
 @@ -7,6 +7,15 @@ import java.util.function.Consumer;
@@ -42,3 +46,6 @@ index 5c277ac7a61df8106f7c13a1ad8ccb1509338699..446c115f19c4dde0d5e269f8d120bc51
  public interface BukkitScheduler {
  
      /**
+-- 
+2.52.0.windows.1
+

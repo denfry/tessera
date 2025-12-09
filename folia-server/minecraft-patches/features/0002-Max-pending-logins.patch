@@ -1,12 +1,16 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From 38e4ac95eb39bd03d6b12cdaddb6efb879b952e0 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Thu, 9 Mar 2023 20:50:15 -0800
-Subject: [PATCH] Max pending logins
+Subject: [PATCH 2/8] Max pending logins
 
 Should help the floodgates on launch
+---
+ .../server/network/ServerLoginPacketListenerImpl.java |  2 +-
+ net/minecraft/server/players/PlayerList.java          | 11 +++++++++++
+ 2 files changed, 12 insertions(+), 1 deletion(-)
 
 diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
-index 8998637bcf1eaeaefa2d6e46a883f761d389a5d0..d6c18d79dc9c0e7ac67a9346008243ace03f71e8 100644
+index 8f07aed..91ba469 100644
 --- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
 @@ -98,7 +98,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
@@ -19,7 +23,7 @@ index 8998637bcf1eaeaefa2d6e46a883f761d389a5d0..d6c18d79dc9c0e7ac67a9346008243ac
  
          if (this.state == ServerLoginPacketListenerImpl.State.WAITING_FOR_DUPE_DISCONNECT
 diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
-index b37ef4ccedfed4bb13f9cda50b1fc5ff7f371664..0de42ad1eefb2258a2520f899f9e62625eab1939 100644
+index 58e8e07..60aa421 100644
 --- a/net/minecraft/server/players/PlayerList.java
 +++ b/net/minecraft/server/players/PlayerList.java
 @@ -150,6 +150,17 @@ public abstract class PlayerList {
@@ -40,3 +44,6 @@ index b37ef4ccedfed4bb13f9cda50b1fc5ff7f371664..0de42ad1eefb2258a2520f899f9e6262
                  this.connectionByName.put(userName, conn);
                  this.connectionById.put(byId, conn);
              }
+-- 
+2.52.0.windows.1
+
