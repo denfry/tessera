@@ -1,15 +1,12 @@
-From 3c3cb703067dc790dc98bca69de89009579d5294 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Thu, 23 Feb 2023 20:12:48 -0800
-Subject: [PATCH 1/4] Force disable timings
+Subject: [PATCH] Force disable timings
 
 Need a new profiler system with region threading
----
- src/main/java/co/aikar/timings/Timings.java | 1 +
- 1 file changed, 1 insertion(+)
 
 diff --git a/src/main/java/co/aikar/timings/Timings.java b/src/main/java/co/aikar/timings/Timings.java
-index 95b7cdf06..89017af09 100644
+index 95b7cdf0677ef71e6885fa78aa5c75bb500f5f53..89017af09ce32e7a66014fc3aeb50155921252a5 100644
 --- a/src/main/java/co/aikar/timings/Timings.java
 +++ b/src/main/java/co/aikar/timings/Timings.java
 @@ -145,6 +145,7 @@ public final class Timings {
@@ -20,6 +17,3 @@ index 95b7cdf06..89017af09 100644
          if (enabled && !warnedAboutDeprecationOnEnable) {
              Bukkit.getLogger().severe(PlainTextComponentSerializer.plainText().serialize(deprecationMessage()));
              warnedAboutDeprecationOnEnable = true;
--- 
-2.52.0.windows.1
-
