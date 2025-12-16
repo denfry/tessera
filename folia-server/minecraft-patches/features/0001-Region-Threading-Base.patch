@@ -9681,10 +9681,10 @@ index 57dfdff52f2ab7a66a215317d6ed927d3a410881..6a9cb4313c0e42889e36ade57ea02bcc
              }
              // Paper end - Add PlayerSetSpawnEvent
 diff --git a/net/minecraft/server/commands/SummonCommand.java b/net/minecraft/server/commands/SummonCommand.java
-index 88927b0bab343ae46678537e25ad8b3a730ab8be..f6fcc5fe018db4e5dd5691d18d49e48f84ac75f3 100644
+index 88927b0bab343ae46678537e25ad8b3a730ab8be..81baca2f0ec800fead23c6be47596a50aaae38a0 100644
 --- a/net/minecraft/server/commands/SummonCommand.java
 +++ b/net/minecraft/server/commands/SummonCommand.java
-@@ -94,11 +94,16 @@ public class SummonCommand {
+@@ -94,11 +94,17 @@ public class SummonCommand {
              if (entity == null) {
                  throw ERROR_FAILED.create();
              } else {
@@ -9695,6 +9695,7 @@ index 88927b0bab343ae46678537e25ad8b3a730ab8be..f6fcc5fe018db4e5dd5691d18d49e48f
                  if (randomizeProperties && entity instanceof Mob mob) {
                      mob.finalizeSpawn(source.getLevel(), source.getLevel().getCurrentDifficultyAt(entity.blockPosition()), EntitySpawnReason.COMMAND, null);
                  }
++                level.tryAddFreshEntityWithPassengers(entity, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.COMMAND); // Folia - region threading
 +                }); // Folia - region threading
  
 -                if (!level.tryAddFreshEntityWithPassengers(entity, org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason.COMMAND)) { // CraftBukkit - pass a spawn reason of "COMMAND"
