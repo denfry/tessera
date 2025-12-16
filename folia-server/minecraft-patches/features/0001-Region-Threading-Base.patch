@@ -11841,7 +11841,7 @@ index ab5efa15a1f56feda7d3e91009a517e98216e734..dd140762829f7311e04263e3ebf29e68
      // Paper end - lag compensation
  }
 diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
-index c855c48ede60eb744cc65e1b560b9a7a3417d8aa..73f641d4035293c3a3c6abb8fa7c61a38c4012cb 100644
+index c855c48ede60eb744cc65e1b560b9a7a3417d8aa..15c9862f76185a8e852a2bce43f31a581fe82a80 100644
 --- a/net/minecraft/server/level/ServerPlayer.java
 +++ b/net/minecraft/server/level/ServerPlayer.java
 @@ -203,7 +203,7 @@ import org.slf4j.Logger;
@@ -12059,7 +12059,7 @@ index c855c48ede60eb744cc65e1b560b9a7a3417d8aa..73f641d4035293c3a3c6abb8fa7c61a3
              } else {
                  this.setCamera(this);
              }
-@@ -1469,8 +1631,321 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -1469,8 +1631,322 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          }
      }
  
@@ -12152,6 +12152,7 @@ index c855c48ede60eb744cc65e1b560b9a7a3417d8aa..73f641d4035293c3a3c6abb8fa7c61a3
 +                            )
 +                        );
 +                    }
++                    ServerPlayer.this.connection.restartClientLoadTimerAfterRespawn();
 +                    // now the respawn logic is complete
 +
 +                    // last, call the function callback
@@ -12381,7 +12382,7 @@ index c855c48ede60eb744cc65e1b560b9a7a3417d8aa..73f641d4035293c3a3c6abb8fa7c61a3
          if (this.isSleeping()) return null; // CraftBukkit - SPIGOT-3154
          if (this.isRemoved()) {
              return null;
-@@ -2516,7 +2991,30 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -2516,7 +2992,30 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          return (Entity)(this.camera == null ? this : this.camera);
      }
  
@@ -12412,7 +12413,7 @@ index c855c48ede60eb744cc65e1b560b9a7a3417d8aa..73f641d4035293c3a3c6abb8fa7c61a3
          Entity camera = this.getCamera();
          this.camera = (Entity)(entityToSpectate == null ? this : entityToSpectate);
          if (camera != this.camera) {
-@@ -2535,16 +3033,19 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -2535,16 +3034,19 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
                  }
              }
              // Paper end - Add PlayerStartSpectatingEntityEvent and PlayerStopSpectatingEntity
@@ -12439,7 +12440,7 @@ index c855c48ede60eb744cc65e1b560b9a7a3417d8aa..73f641d4035293c3a3c6abb8fa7c61a3
          }
      }
  
-@@ -2902,11 +3403,11 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -2902,11 +3404,11 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
      }
  
      public void registerEnderPearl(ThrownEnderpearl enderPearl) {
@@ -12453,7 +12454,7 @@ index c855c48ede60eb744cc65e1b560b9a7a3417d8aa..73f641d4035293c3a3c6abb8fa7c61a3
      }
  
      public Set<ThrownEnderpearl> getEnderPearls() {
-@@ -3101,7 +3602,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+@@ -3101,7 +3603,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
          this.experienceLevel = this.newLevel;
          this.totalExperience = this.newTotalExp;
          this.experienceProgress = 0;
@@ -12705,7 +12706,7 @@ index 33e1cdb00d648c992af03a976899253141314b27..7f86b3538449616a7fa8423e86897364
              }
              // Spigot end
 diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-index 1feb7e47b3aeb840676cf90ed3f62a42f4b03306..d84cdd0e7e783d47bdba173ee0536454efac37cb 100644
+index 1feb7e47b3aeb840676cf90ed3f62a42f4b03306..5302f32bf3540e194963c0153e90ea1664ea7b44 100644
 --- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 @@ -293,10 +293,10 @@ public class ServerGamePacketListenerImpl
@@ -13075,6 +13076,15 @@ index 1feb7e47b3aeb840676cf90ed3f62a42f4b03306..d84cdd0e7e783d47bdba173ee0536454
                      this.player.setChatSession(chatSession);
                      this.server
                          .getPlayerList()
+@@ -3695,7 +3781,7 @@ public class ServerGamePacketListenerImpl
+         this.waitingForRespawn = true;
+     }
+ 
+-    private void restartClientLoadTimerAfterRespawn() {
++    public void restartClientLoadTimerAfterRespawn() { // Folia - region threading
+         this.waitingForRespawn = false;
+         this.clientLoadedTimeoutTimer = 60;
+     }
 @@ -3725,19 +3811,7 @@ public class ServerGamePacketListenerImpl
  
      @Override
