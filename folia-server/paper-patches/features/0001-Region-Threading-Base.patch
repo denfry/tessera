@@ -929,7 +929,7 @@ index b2961752b50e98d95adf3af4f658e2fdb2127d43..51b54104eb70f64a548f37eeab1a4446
  
      @Override
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
-index 6cd3469d49f0e56f212d393f133205aa3b295a88..df936767a7d7a252d362bd97cad4aaf093e70ab0 100644
+index 6cd3469d49f0e56f212d393f133205aa3b295a88..d66f6b829dda61823ddb238d31a9d9de381741a2 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
 @@ -239,7 +239,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
@@ -1172,7 +1172,7 @@ index 6cd3469d49f0e56f212d393f133205aa3b295a88..df936767a7d7a252d362bd97cad4aaf0
          Preconditions.checkArgument(spawnCategory != null, "SpawnCategory cannot be null");
          Preconditions.checkArgument(CraftSpawnCategory.isValidForLimits(spawnCategory), "SpawnCategory.%s are not supported", spawnCategory);
  
-@@ -1498,26 +1518,31 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+@@ -1498,21 +1518,25 @@ public class CraftWorld extends CraftRegionAccessor implements World {
  
      @Override
      public void setMetadata(String metadataKey, MetadataValue newMetadataValue) {
@@ -1198,13 +1198,7 @@ index 6cd3469d49f0e56f212d393f133205aa3b295a88..df936767a7d7a252d362bd97cad4aaf0
          this.server.getWorldMetadata().removeMetadata(this, metadataKey, owningPlugin);
      }
  
-     @Override
-     public int getSpawnLimit(SpawnCategory spawnCategory) {
-+        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Cannot modify server settings off of the global region"); // Folia - region threading
-         Preconditions.checkArgument(spawnCategory != null, "SpawnCategory cannot be null");
-         Preconditions.checkArgument(CraftSpawnCategory.isValidForLimits(spawnCategory), "SpawnCategory.%s are not supported", spawnCategory);
- 
-@@ -1534,6 +1559,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+@@ -1534,6 +1558,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
  
      @Override
      public void setSpawnLimit(SpawnCategory spawnCategory, int limit) {
@@ -1212,7 +1206,7 @@ index 6cd3469d49f0e56f212d393f133205aa3b295a88..df936767a7d7a252d362bd97cad4aaf0
          Preconditions.checkArgument(spawnCategory != null, "SpawnCategory cannot be null");
          Preconditions.checkArgument(CraftSpawnCategory.isValidForLimits(spawnCategory), "SpawnCategory.%s are not supported", spawnCategory);
  
-@@ -1591,7 +1617,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+@@ -1591,7 +1616,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
          if (!(entity instanceof CraftEntity craftEntity) || entity.getWorld() != this || sound == null || category == null) return;
  
          ClientboundSoundEntityPacket packet = new ClientboundSoundEntityPacket(CraftSound.bukkitToMinecraftHolder(sound), net.minecraft.sounds.SoundSource.valueOf(category.name()), craftEntity.getHandle(), volume, pitch, seed);
@@ -1221,7 +1215,7 @@ index 6cd3469d49f0e56f212d393f133205aa3b295a88..df936767a7d7a252d362bd97cad4aaf0
          if (entityTracker != null) {
              entityTracker.sendToTrackingPlayersAndSelf(packet);
          }
-@@ -1612,7 +1638,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+@@ -1612,7 +1637,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
          if (!(entity instanceof CraftEntity craftEntity) || entity.getWorld() != this || sound == null || category == null) return;
  
          ClientboundSoundEntityPacket packet = new ClientboundSoundEntityPacket(Holder.direct(SoundEvent.createVariableRangeEvent(Identifier.parse(sound))), net.minecraft.sounds.SoundSource.valueOf(category.name()), craftEntity.getHandle(), volume, pitch, seed);
@@ -1230,7 +1224,7 @@ index 6cd3469d49f0e56f212d393f133205aa3b295a88..df936767a7d7a252d362bd97cad4aaf0
          if (entityTracker != null) {
              entityTracker.sendToTrackingPlayersAndSelf(packet);
          }
-@@ -1663,6 +1689,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+@@ -1663,6 +1688,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
      @SuppressWarnings({"unchecked", "rawtypes"})
      @Override
      public boolean setGameRuleValue(String rule, String value) {
@@ -1238,7 +1232,7 @@ index 6cd3469d49f0e56f212d393f133205aa3b295a88..df936767a7d7a252d362bd97cad4aaf0
          // No null values allowed
          if (rule == null || value == null) return false;
  
-@@ -1726,6 +1753,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+@@ -1726,6 +1752,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
  
      @Override
      public <T> boolean setGameRule(org.bukkit.@NotNull GameRule<T> rule, @NotNull T newValue) {
@@ -1246,7 +1240,7 @@ index 6cd3469d49f0e56f212d393f133205aa3b295a88..df936767a7d7a252d362bd97cad4aaf0
          Preconditions.checkArgument(rule != null, "GameRule cannot be null");
          Preconditions.checkArgument(newValue != null, "GameRule value cannot be null");
  
-@@ -1879,6 +1907,12 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+@@ -1879,6 +1906,12 @@ public class CraftWorld extends CraftRegionAccessor implements World {
  
      @Override
      public void sendGameEvent(Entity sourceEntity, org.bukkit.GameEvent gameEvent, Vector position) {
@@ -1259,7 +1253,7 @@ index 6cd3469d49f0e56f212d393f133205aa3b295a88..df936767a7d7a252d362bd97cad4aaf0
          getHandle().gameEvent(sourceEntity != null ? ((CraftEntity) sourceEntity).getHandle(): null, net.minecraft.core.registries.BuiltInRegistries.GAME_EVENT.get(org.bukkit.craftbukkit.util.CraftNamespacedKey.toMinecraft(gameEvent.getKey())).orElseThrow(), org.bukkit.craftbukkit.util.CraftVector.toBlockPos(position));
      }
      // Paper end
-@@ -1908,7 +1942,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+@@ -1908,7 +1941,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
          Preconditions.checkArgument(radius >= 0, "Radius value (%s) cannot be negative", radius);
  
          Raids persistentRaid = this.world.getRaids();
