@@ -12620,7 +12620,7 @@ index b8a4b4cc02a2fc6b70f4b840796eed501aad6239..0bf2173c5445de021090c2d0264afc44
  
      // Paper start - add proper async disconnect
 diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
-index a3645322be006d5501fa7fb8944509a9c6b58e32..78db6eb8567f6495e0c5dc474589e47a3043976a 100644
+index a3645322be006d5501fa7fb8944509a9c6b58e32..2cc3dd1f267ae78d3aacb84509d4bf668235688f 100644
 --- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
 @@ -53,6 +53,7 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
@@ -12650,8 +12650,8 @@ index a3645322be006d5501fa7fb8944509a9c6b58e32..78db6eb8567f6495e0c5dc474589e47a
 +
 +            this.switchToMain = serverPlayer;
 +            // now the connection responsibility is transferred to the region
-+            final net.minecraft.server.level.ServerLevel world = serverPlayer.level();
-+            final net.minecraft.world.level.ChunkPos chunkPos = serverPlayer.chunkPosition();
++            final net.minecraft.server.level.ServerLevel world = this.prepareSpawnTask.getSpawnWorld();
++            final net.minecraft.world.level.ChunkPos chunkPos = new net.minecraft.world.level.ChunkPos(net.minecraft.core.BlockPos.containing(this.prepareSpawnTask.getSpawnPosition()));
 +            world.moonrise$getChunkTaskScheduler().scheduleTickingState(
 +                    chunkPos.x, chunkPos.z, net.minecraft.server.level.FullChunkStatus.ENTITY_TICKING, true,
 +                    ca.spottedleaf.concurrentutil.util.Priority.HIGHER,
@@ -13142,10 +13142,10 @@ index 31bc0a105152a7f24a4126542bea7dbebc3e037c..ce40fda2f6174602d53d46e860e87cf0
              if (asyncEvent.getResult() != PlayerPreLoginEvent.Result.ALLOWED) {
                  event.disallow(asyncEvent.getResult(), asyncEvent.kickMessage()); // Paper - Adventure
 diff --git a/net/minecraft/server/network/config/PrepareSpawnTask.java b/net/minecraft/server/network/config/PrepareSpawnTask.java
-index 5014840bf5d7ef53a4fea8aa6f3b25eb4033ff96..2cfbe6c119fcd7379bfea04920eef29b6b4f0312 100644
+index 5014840bf5d7ef53a4fea8aa6f3b25eb4033ff96..1fd5a68fcb685646c5c28c8e94ffef5eb319d7d8 100644
 --- a/net/minecraft/server/network/config/PrepareSpawnTask.java
 +++ b/net/minecraft/server/network/config/PrepareSpawnTask.java
-@@ -107,9 +107,20 @@ public class PrepareSpawnTask implements ConfigurationTask {
+@@ -107,9 +107,24 @@ public class PrepareSpawnTask implements ConfigurationTask {
              }
              final ServerLevel serverLevel = serverLevel1;
              // Paper end - move logic in Entity to here, to use bukkit supplied world UUID & reset to main world spawn if no valid world is found
@@ -13154,30 +13154,51 @@ index 5014840bf5d7ef53a4fea8aa6f3b25eb4033ff96..2cfbe6c119fcd7379bfea04920eef29b
 -                .orElseGet(() -> PlayerSpawnFinder.findSpawn(serverLevel, respawnData.pos()));
 +            // Folia start - region threading
 +            CompletableFuture<Vec3> completableFuture = new java.util.concurrent.CompletableFuture<>();
-+            ca.spottedleaf.concurrentutil.completable.CallbackCompletable<org.bukkit.Location> spawnComplete = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
-+            spawnComplete.addWaiter(
-+                    (final org.bukkit.Location loc, final Throwable throwable) -> {
-+                        if (throwable != null) {
-+                            completableFuture.completeExceptionally(throwable);
-+                        } else {
-+                            completableFuture.complete(io.papermc.paper.util.MCUtil.toVec3(loc));
++            if (savedPosition.position().isPresent()) {
++                completableFuture.complete(savedPosition.position().get());
++            } else {
++                ca.spottedleaf.concurrentutil.completable.CallbackCompletable<org.bukkit.Location> spawnComplete = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
++                spawnComplete.addWaiter(
++                        (final org.bukkit.Location loc, final Throwable throwable) -> {
++                            if (throwable != null) {
++                                completableFuture.completeExceptionally(throwable);
++                            } else {
++                                completableFuture.complete(io.papermc.paper.util.MCUtil.toVec3(loc));
++                            }
 +                        }
-+                    }
-+            );
-+            ServerPlayer.fudgeSpawnLocation(serverLevel, spawnComplete);
++                );
++                ServerPlayer.fudgeSpawnLocation(serverLevel, spawnComplete);
++            }
 +            // Folia end - region threading
              Vec2 vec2 = savedPosition.rotation().orElse(new Vec2(respawnData.yaw(), respawnData.pitch()));
              this.state = new PrepareSpawnTask.Preparing(serverLevel, completableFuture, vec2);
          }
-@@ -133,9 +144,19 @@ public class PrepareSpawnTask implements ConfigurationTask {
+@@ -133,9 +148,35 @@ public class PrepareSpawnTask implements ConfigurationTask {
          };
      }
  
 -    public ServerPlayer spawnPlayer(Connection connection, CommonListenerCookie cookie) {
 +    // Folia start - region threading
-+    public ServerPlayer createPlayer(Connection connection, CommonListenerCookie cookie) { // Folia - region threading
++    public ServerLevel getSpawnWorld() {
 +        if (this.state instanceof PrepareSpawnTask.Ready ready) {
-+            return ready.createPlayer(connection, cookie); // Folia - region threading
++            return ready.getSpawnWorld();
++        } else {
++            throw new IllegalStateException("Player spawn was not ready");
++        }
++    }
++
++    public Vec3 getSpawnPosition() {
++        if (this.state instanceof PrepareSpawnTask.Ready ready) {
++            return ready.getSpawnPosition();
++        } else {
++            throw new IllegalStateException("Player spawn was not ready");
++        }
++    }
++
++    public ServerPlayer createPlayer(Connection connection, CommonListenerCookie cookie) {
+         if (this.state instanceof PrepareSpawnTask.Ready ready) {
+-            return ready.spawn(connection, cookie);
++            return ready.createPlayer(connection, cookie);
 +        } else {
 +            throw new IllegalStateException("Player spawn was not ready");
 +        }
@@ -13185,13 +13206,12 @@ index 5014840bf5d7ef53a4fea8aa6f3b25eb4033ff96..2cfbe6c119fcd7379bfea04920eef29b
 +    // Folia end - region threading
 +
 +    public ServerPlayer spawnPlayer(Connection connection, CommonListenerCookie cookie, ServerPlayer serverPlayer) { // Folia - region threading
-         if (this.state instanceof PrepareSpawnTask.Ready ready) {
--            return ready.spawn(connection, cookie);
++        if (this.state instanceof PrepareSpawnTask.Ready ready) {
 +            return ready.spawn(connection, cookie, serverPlayer); // Folia - region threading
          } else {
              throw new IllegalStateException("Player spawn was not ready");
          }
-@@ -185,7 +206,7 @@ public class PrepareSpawnTask implements ConfigurationTask {
+@@ -185,7 +226,7 @@ public class PrepareSpawnTask implements ConfigurationTask {
                  Vec3 vec3 = this.spawnPosition.join();
                  if (this.chunkLoadFuture == null) {
                      // Paper start - PlayerSpawnLocationEvent
@@ -13200,7 +13220,7 @@ index 5014840bf5d7ef53a4fea8aa6f3b25eb4033ff96..2cfbe6c119fcd7379bfea04920eef29b
                          ServerPlayer serverPlayer;
                          if (PrepareSpawnTask.this.listener.connection.savedPlayerForLegacyEvents != null) {
                              serverPlayer = PrepareSpawnTask.this.listener.connection.savedPlayerForLegacyEvents;
-@@ -261,9 +282,11 @@ public class PrepareSpawnTask implements ConfigurationTask {
+@@ -261,9 +302,19 @@ public class PrepareSpawnTask implements ConfigurationTask {
              this.spawnLevel.getChunkSource().addTicketWithRadius(TicketType.PLAYER_SPAWN, new ChunkPos(BlockPos.containing(this.spawnPosition)), 3);
          }
  
@@ -13208,6 +13228,14 @@ index 5014840bf5d7ef53a4fea8aa6f3b25eb4033ff96..2cfbe6c119fcd7379bfea04920eef29b
 -            ChunkPos chunkPos = new ChunkPos(BlockPos.containing(this.spawnPosition));
 -            this.spawnLevel.waitForEntities(chunkPos, 3);
 +        // Folia start - region threading
++        public ServerLevel getSpawnWorld() {
++            return this.spawnLevel;
++        }
++
++        public Vec3 getSpawnPosition() {
++            return this.spawnPosition;
++        }
++
 +        public ServerPlayer createPlayer(Connection connection, CommonListenerCookie cookie) {
 +            //ChunkPos chunkPos = new ChunkPos(BlockPos.containing(this.spawnPosition));
 +            //this.spawnLevel.waitForEntities(chunkPos, 3);
@@ -13215,7 +13243,7 @@ index 5014840bf5d7ef53a4fea8aa6f3b25eb4033ff96..2cfbe6c119fcd7379bfea04920eef29b
              // Paper start - configuration api - possibly use legacy saved server player instance
              ServerPlayer serverPlayer;
              if (connection.savedPlayerForLegacyEvents != null) {
-@@ -277,6 +300,11 @@ public class PrepareSpawnTask implements ConfigurationTask {
+@@ -277,6 +328,11 @@ public class PrepareSpawnTask implements ConfigurationTask {
                  serverPlayer = new ServerPlayer(PrepareSpawnTask.this.server, this.spawnLevel, cookie.gameProfile(), cookie.clientInformation());
              }
              // Paper end - configuration api - possibly use legacy saved server player instance
