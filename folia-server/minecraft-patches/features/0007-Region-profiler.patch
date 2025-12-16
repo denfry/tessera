@@ -735,15 +735,16 @@ index 0000000000000000000000000000000000000000..d1d259fbf6633ea38799b1519bca6deb
 +}
 diff --git a/ca/spottedleaf/leafprofiler/RegionizedProfiler.java b/ca/spottedleaf/leafprofiler/RegionizedProfiler.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..6e9b04613c5c867a74fa4f266a8ae8e60416cb6d
+index 0000000000000000000000000000000000000000..b35897769685d46b6c30e98a4bcef8cfa73521d4
 --- /dev/null
 +++ b/ca/spottedleaf/leafprofiler/RegionizedProfiler.java
-@@ -0,0 +1,277 @@
+@@ -0,0 +1,278 @@
 +package ca.spottedleaf.leafprofiler;
 +
 +import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
++import ca.spottedleaf.moonrise.common.time.TickData;
++import ca.spottedleaf.moonrise.common.time.TickTime;
 +import io.papermc.paper.threadedregions.ThreadedRegionizer;
-+import io.papermc.paper.threadedregions.TickData;
 +import io.papermc.paper.threadedregions.TickRegionScheduler;
 +import io.papermc.paper.threadedregions.TickRegions;
 +import it.unimi.dsi.fastutil.longs.LongArrayList;
@@ -941,7 +942,7 @@ index 0000000000000000000000000000000000000000..6e9b04613c5c867a74fa4f266a8ae8e6
 +            return timer;
 +        }
 +
-+        public void addTickTime(final TickRegionScheduler.TickTime tickTime) {
++        public void addTickTime(final TickTime tickTime) {
 +            if (this.noOp) {
 +                return;
 +            }
@@ -1058,7 +1059,7 @@ index fdb0bcdca1cd38f55f191d42e422c354af4452b5..24c8581b2fa9c3ef6f6aad64bd4454d6
  
      private boolean saveChunk(final ChunkAccess chunk, final boolean unloading, final Completable<CompoundTag>[] chunkSave) {
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-index f0a6318233afa8f4cd4034443b0be1305aed248d..d936af760980d469d09b789704f84979098c13c2 100644
+index 615f30ce344455112088220a953ad78e07b284bc..94cffb77dd8aeb8329ec89d94c8709a2b67a5513 100644
 --- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 @@ -69,8 +69,13 @@ public final class TickRegionScheduler {
@@ -1104,10 +1105,10 @@ index f0a6318233afa8f4cd4034443b0be1305aed248d..d936af760980d469d09b789704f84979
          public TickThreadRunner(final Runnable run, final String name) {
              super(run, name);
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index df15b1139e71dfe10b8f24ec6d235b99f6d5006a..b1c07e582dbf0a203cf734fdbcd8387a422af3a6 100644
+index 312a98beecb95153cd10424c1c44f0d5e97a87d8..e61fbf9fbb9330087e49f92117aa0e8bad3770f6 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -81,6 +81,11 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -82,6 +82,11 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
      @Override
      public void onRegionDestroy(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
          // nothing for now
@@ -1119,7 +1120,7 @@ index df15b1139e71dfe10b8f24ec6d235b99f6d5006a..b1c07e582dbf0a203cf734fdbcd8387a
      }
  
      @Override
-@@ -103,13 +108,23 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -104,13 +109,23 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
      @Override
      public void preMerge(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> from,
                           final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> into) {
@@ -1145,7 +1146,7 @@ index df15b1139e71dfe10b8f24ec6d235b99f6d5006a..b1c07e582dbf0a203cf734fdbcd8387a
      }
  
      public static final class TickRegionSectionData implements ThreadedRegionizer.ThreadedRegionSectionData {}
-@@ -167,6 +182,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -168,6 +183,8 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
          // async-safe read-only region data
          private final RegionStats regionStats;
  
@@ -1154,13 +1155,13 @@ index df15b1139e71dfe10b8f24ec6d235b99f6d5006a..b1c07e582dbf0a203cf734fdbcd8387a
          private TickRegionData(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
              this.region = region;
              this.world = region.regioniser.world;
-@@ -372,13 +389,29 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -373,13 +390,29 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
              return this.region.region.markNotTicking();
          }
  
 +        // Folia start - profiler
 +        @Override
-+        protected void addTickTime(final TickRegionScheduler.TickTime time) {
++        protected void addTickTime(final TickTime time) {
 +            super.addTickTime(time);
 +
 +            final ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler = io.papermc.paper.threadedregions.TickRegionScheduler.getProfiler();
@@ -1184,7 +1185,7 @@ index df15b1139e71dfe10b8f24ec6d235b99f6d5006a..b1c07e582dbf0a203cf734fdbcd8387a
              final RegionizedTaskQueue.RegionTaskQueueData queue = this.region.taskQueueData;
  
              boolean processedChunkTask = false;
-@@ -399,6 +432,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -400,6 +433,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
                  this.region.world.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
              }
              return true;
@@ -1194,16 +1195,17 @@ index df15b1139e71dfe10b8f24ec6d235b99f6d5006a..b1c07e582dbf0a203cf734fdbcd8387a
          @Override
 diff --git a/io/papermc/paper/threadedregions/commands/CommandProfiler.java b/io/papermc/paper/threadedregions/commands/CommandProfiler.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..dbc6ffd8fec4570de4abdb3aa0a16d0e0cc09353
+index 0000000000000000000000000000000000000000..08a0f331ac8895acb1d0fe163d85037c1b0b6062
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/commands/CommandProfiler.java
-@@ -0,0 +1,245 @@
+@@ -0,0 +1,246 @@
 +package io.papermc.paper.threadedregions.commands;
 +
 +import ca.spottedleaf.leafprofiler.RegionizedProfiler;
++import ca.spottedleaf.moonrise.common.time.TickData;
 +import com.mojang.logging.LogUtils;
 +import io.papermc.paper.threadedregions.ThreadedRegionizer;
-+import io.papermc.paper.threadedregions.TickData;
++import io.papermc.paper.threadedregions.TickRegionScheduler;
 +import io.papermc.paper.threadedregions.TickRegions;
 +import io.papermc.paper.util.MCUtil;
 +import net.kyori.adventure.text.Component;
@@ -1392,7 +1394,7 @@ index 0000000000000000000000000000000000000000..dbc6ffd8fec4570de4abdb3aa0a16d0e
 +        // write region data
 +        for (final RegionizedProfiler.RegionTimings regionTimings : results.timings()) {
 +            final File regionProfile = new File(directory, "region-" + regionTimings.regionId() + ".txt");
-+            final TickData.TickReportData tickReport = regionTimings.tickData().generateTickReport(null, regionTimings.endTime());
++            final TickData.TickReportData tickReport = regionTimings.tickData().generateTickReport(null, regionTimings.endTime(), TickRegionScheduler.TIME_BETWEEN_TICKS);
 +
 +            final List<String> out = new ArrayList<>();
 +            out.add("Total time: " + THREE_DECIMAL_PLACES.get().format(1.0E-9 * (regionTimings.endTime() - regionTimings.startTime())) + "s");
@@ -1559,7 +1561,7 @@ index 2ab577f545330efa8ee27999c99301a062a79307..f887361fcce734f42f11bca3e0029deb
          //this.playerList.tick(); // Folia - region threading
          profilerFiller.popPush("debugSubscribers");
 diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
-index 76c160bfd593e3cbbb374a38fefe8adcfa2e17db..a2a3ba5e65bcf3c889d0467930d9a188f81d4b5e 100644
+index 47e1d65f0c2fb6535413bf66e2b40516ff9f7484..6292d9ae1e4b7b586f0806e01b86fc2092f1c153 100644
 --- a/net/minecraft/server/level/ChunkMap.java
 +++ b/net/minecraft/server/level/ChunkMap.java
 @@ -415,12 +415,17 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
@@ -1737,7 +1739,7 @@ index 79bc7b4f112f390592694e2d5c358f1c98e6c310..7400be75c5dae2b24cc327d23b703bf6
  
          profiler.pop();
 diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
-index bbeb1a8463018c2199ff8f23798af853f6366d92..32dc2189b59587b634e5bb78407e3bce45b26b3b 100644
+index dd140762829f7311e04263e3ebf29e68192b8b28..455e4f95efc0c27e09d41d4a4deff5ab913433ee 100644
 --- a/net/minecraft/server/level/ServerLevel.java
 +++ b/net/minecraft/server/level/ServerLevel.java
 @@ -761,6 +761,7 @@ public class ServerLevel extends Level implements ServerEntityGetter, WorldGenLe
@@ -1870,7 +1872,7 @@ index bbeb1a8463018c2199ff8f23798af853f6366d92..32dc2189b59587b634e5bb78407e3bce
      }
  
 diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
-index c7d89134c2b4648181b880f14fdf5205185fdacf..b9dabb90e932126fd99471b3767404004535df04 100644
+index ef90696df3fa0f6b29a76addac256c64da0f571f..2dcd7ece555d2343cc734097831787d29309f070 100644
 --- a/net/minecraft/server/players/PlayerList.java
 +++ b/net/minecraft/server/players/PlayerList.java
 @@ -1023,6 +1023,7 @@ public abstract class PlayerList {
