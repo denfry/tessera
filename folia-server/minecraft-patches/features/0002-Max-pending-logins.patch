@@ -1,19 +1,15 @@
-From 38e4ac95eb39bd03d6b12cdaddb6efb879b952e0 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Thu, 9 Mar 2023 20:50:15 -0800
-Subject: [PATCH 2/8] Max pending logins
+Subject: [PATCH] Max pending logins
 
 Should help the floodgates on launch
----
- .../server/network/ServerLoginPacketListenerImpl.java |  2 +-
- net/minecraft/server/players/PlayerList.java          | 11 +++++++++++
- 2 files changed, 12 insertions(+), 1 deletion(-)
 
 diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
-index 8f07aed..91ba469 100644
+index f8eb6e23f16be9a28f1b43e61de8904a96e630cf..991d7ee21e87604237a5526da9a3d6ccc1246df7 100644
 --- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
-@@ -98,7 +98,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
+@@ -100,7 +100,7 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
              if (this.server.getPlayerList().pushPendingJoin(name, uniqueId, this.connection)) {
              // Folia end - region threading - rewrite login process
              this.verifyLoginAndFinishConnectionSetup(Objects.requireNonNull(this.authenticatedProfile));
@@ -23,7 +19,7 @@ index 8f07aed..91ba469 100644
  
          if (this.state == ServerLoginPacketListenerImpl.State.WAITING_FOR_DUPE_DISCONNECT
 diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
-index 58e8e07..60aa421 100644
+index c644ef9696ec5abcf74e21514a56a7a4002656ad..c7d89134c2b4648181b880f14fdf5205185fdacf 100644
 --- a/net/minecraft/server/players/PlayerList.java
 +++ b/net/minecraft/server/players/PlayerList.java
 @@ -150,6 +150,17 @@ public abstract class PlayerList {
@@ -44,6 +40,3 @@ index 58e8e07..60aa421 100644
                  this.connectionByName.put(userName, conn);
                  this.connectionById.put(byId, conn);
              }
--- 
-2.52.0.windows.1
-

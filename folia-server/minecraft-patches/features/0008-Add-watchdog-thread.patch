@@ -1,20 +1,14 @@
-From 022af2ed13ce21c7d5fd4e155dac934990909119 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Fri, 30 Aug 2024 18:34:32 -0700
-Subject: [PATCH 8/8] Add watchdog thread
+Subject: [PATCH] Add watchdog thread
 
 When regions take too long, having the server print the stacktrace
 of the ticking region should help debug the cause.
----
- .../threadedregions/FoliaWatchdogThread.java  | 104 ++++++++++++++++++
- .../threadedregions/TickRegionScheduler.java  |  13 +++
- .../paper/threadedregions/TickRegions.java    |   4 +-
- 3 files changed, 119 insertions(+), 2 deletions(-)
- create mode 100644 io/papermc/paper/threadedregions/FoliaWatchdogThread.java
 
 diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
 new file mode 100644
-index 0000000..e9ca1a1
+index 0000000000000000000000000000000000000000..e9ca1a15049b0211d10401cb78e953b93afaf6c7
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
 @@ -0,0 +1,104 @@
@@ -123,10 +117,10 @@ index 0000000..e9ca1a1
 +    }
 +}
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-index e392457..fa6b8d7 100644
+index d936af760980d469d09b789704f84979098c13c2..826913a37c437288f489acc57dd0d5f8c2576a85 100644
 --- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-@@ -34,6 +34,13 @@ public final class TickRegionScheduler {
+@@ -36,6 +36,13 @@ public final class TickRegionScheduler {
      public static final int TICK_RATE = 20;
      public static final long TIME_BETWEEN_TICKS = 1_000_000_000L / TICK_RATE; // ns
  
@@ -140,7 +134,7 @@ index e392457..fa6b8d7 100644
      private final SchedulerThreadPool scheduler;
  
      public TickRegionScheduler(final int threads) {
-@@ -327,6 +334,8 @@ public final class TickRegionScheduler {
+@@ -329,6 +336,8 @@ public final class TickRegionScheduler {
              }
  
              final boolean ret;
@@ -149,7 +143,7 @@ index e392457..fa6b8d7 100644
              try {
                  ret = this.runRegionTasks(() -> {
                      return !RegionScheduleHandle.this.cancelled.get() && canContinue.getAsBoolean();
-@@ -336,6 +345,7 @@ public final class TickRegionScheduler {
+@@ -338,6 +347,7 @@ public final class TickRegionScheduler {
                  // don't release region for another tick
                  return null;
              } finally {
@@ -157,7 +151,7 @@ index e392457..fa6b8d7 100644
                  final long tickEnd = System.nanoTime();
                  final long cpuEnd = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
  
-@@ -401,6 +411,8 @@ public final class TickRegionScheduler {
+@@ -403,6 +413,8 @@ public final class TickRegionScheduler {
                  this.currentTickingThread = Thread.currentThread();
              }
  
@@ -166,7 +160,7 @@ index e392457..fa6b8d7 100644
              try {
                  // next start isn't updated until the end of this tick
                  this.tickRegion(tickCount, tickStart, scheduledEnd);
-@@ -409,6 +421,7 @@ public final class TickRegionScheduler {
+@@ -411,6 +423,7 @@ public final class TickRegionScheduler {
                  // regionFailed will schedule a shutdown, so we should avoid letting this region tick further
                  return false;
              } finally {
@@ -175,7 +169,7 @@ index e392457..fa6b8d7 100644
                  final long cpuEnd = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
  
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index b1c07e5..988fe74 100644
+index b1c07e582dbf0a203cf734fdbcd8387a422af3a6..988fe74578065c9464f5639e5cc6af79619edef5 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
 @@ -330,9 +330,9 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
@@ -190,6 +184,3 @@ index b1c07e5..988fe74 100644
  
          private ConcreteRegionTickHandle(final TickRegionData region, final long start) {
              super(region, start);
--- 
-2.52.0.windows.1
-

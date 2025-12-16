@@ -1,22 +1,19 @@
-From 92ebed132f15ec6f7e8fc7764e7df2990770aa90 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Sun, 23 Apr 2023 07:08:26 -0700
-Subject: [PATCH 5/8] Block reading in-world tile entities on worldgen threads
+Subject: [PATCH] Block reading in-world tile entities on worldgen threads
 
 The returned TE may be in the world, in which case it is unsafe
 for the current thread to modify or access its contents.
----
- net/minecraft/world/level/chunk/ImposterProtoChunk.java | 5 +++++
- 1 file changed, 5 insertions(+)
 
 diff --git a/net/minecraft/world/level/chunk/ImposterProtoChunk.java b/net/minecraft/world/level/chunk/ImposterProtoChunk.java
-index d1331b5..b430bb3 100644
+index ba91dc3b8b4d70af32b7d9323f22c1fafabe913f..5107c9a02f2deb6244e6f88e6a1854a16fa2813f 100644
 --- a/net/minecraft/world/level/chunk/ImposterProtoChunk.java
 +++ b/net/minecraft/world/level/chunk/ImposterProtoChunk.java
-@@ -91,6 +91,11 @@ public class ImposterProtoChunk extends ProtoChunk implements ca.spottedleaf.moo
-     @Nullable
+@@ -83,6 +83,11 @@ public class ImposterProtoChunk extends ProtoChunk implements ca.spottedleaf.moo
+ 
      @Override
-     public BlockEntity getBlockEntity(BlockPos pos) {
+     public @Nullable BlockEntity getBlockEntity(BlockPos pos) {
 +        // Folia start - block reading possibly in-world block data for worldgen threads
 +        if (!this.allowWrites && !ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) {
 +            return null;
@@ -25,6 +22,3 @@ index d1331b5..b430bb3 100644
          return this.wrapped.getBlockEntity(pos);
      }
  
--- 
-2.52.0.windows.1
-

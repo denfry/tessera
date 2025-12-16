@@ -1,15 +1,11 @@
-From 2ab94d0ad9409f09ebcb218fe8d94ff6e5ae3221 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Fri, 10 Mar 2023 00:16:26 -0800
-Subject: [PATCH 3/8] Add chunk system throughput counters to /tps
+Subject: [PATCH] Add chunk system throughput counters to /tps
 
----
- .../scheduling/task/ChunkFullTask.java        | 28 +++++++++++++++++++
- .../commands/CommandServerHealth.java         |  9 ++++++
- 2 files changed, 37 insertions(+)
 
 diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkFullTask.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkFullTask.java
-index 96ccb8f..fd48134 100644
+index 96ccb8f657d755b2e58a8dd0cda00ca0df4886b2..fd48134ab73d3096bc86402b4eb393c8153fceab 100644
 --- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkFullTask.java
 +++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/task/ChunkFullTask.java
 @@ -30,6 +30,9 @@ public final class ChunkFullTask extends ChunkProgressionTask implements Runnabl
@@ -62,7 +58,7 @@ index 96ccb8f..fd48134 100644
                  chunk = wrappedFull.getWrapped();
              } else {
 diff --git a/io/papermc/paper/threadedregions/commands/CommandServerHealth.java b/io/papermc/paper/threadedregions/commands/CommandServerHealth.java
-index ebe2592..5e6b490 100644
+index ebe2592a78e996fa2d415663bd6436effec1ca29..5e6b490ee58a90fd7c02fa09093830c0d9c67f6b 100644
 --- a/io/papermc/paper/threadedregions/commands/CommandServerHealth.java
 +++ b/io/papermc/paper/threadedregions/commands/CommandServerHealth.java
 @@ -170,6 +170,9 @@ public final class CommandServerHealth extends Command {
@@ -88,6 +84,3 @@ index ebe2592..5e6b490 100644
                  .append(Component.text(" - ", LIST, TextDecoration.BOLD))
                  .append(Component.text("Lowest Region TPS: ", PRIMARY))
                  .append(Component.text(TWO_DECIMAL_PLACES.get().format(minTps) + "\n", CommandUtil.getColourForTPS(minTps)))
--- 
-2.52.0.windows.1
-

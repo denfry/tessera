@@ -1,25 +1,18 @@
-From 068f12eb799361f765301aab947d785b639ecc30 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Spottedleaf <Spottedleaf@users.noreply.github.com>
 Date: Mon, 17 Apr 2023 19:47:57 -0700
-Subject: [PATCH 4/8] Prevent block updates in non-loaded or non-owned chunks
+Subject: [PATCH] Prevent block updates in non-loaded or non-owned chunks
 
 This is to prevent block physics from tripping thread checks by
 far exceeding the bounds of the current region. While this does
 add explicit block update suppression techniques, it's better
 than the server crashing.
----
- net/minecraft/world/level/Level.java                   |  2 +-
- net/minecraft/world/level/block/DetectorRailBlock.java |  4 ++--
- net/minecraft/world/level/block/PoweredRailBlock.java  |  4 ++--
- net/minecraft/world/level/block/RedStoneWireBlock.java |  3 ++-
- .../level/redstone/CollectingNeighborUpdater.java      | 10 +++++++---
- 5 files changed, 14 insertions(+), 9 deletions(-)
 
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index 8b60d3c..2acf7bb 100644
+index 5849ef10c5b2d1d7d2650839d629c8a87689d322..40d8a43b6b4a3fdb623a796dcd219cabc8632d7c 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
-@@ -2045,7 +2045,7 @@ public abstract class Level implements LevelAccessor, UUIDLookup<Entity>, AutoCl
+@@ -2020,7 +2020,7 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
      public void updateNeighbourForOutputSignal(BlockPos pos, Block block) {
          for (Direction direction : Direction.Plane.HORIZONTAL) {
              BlockPos blockPos = pos.relative(direction);
@@ -29,7 +22,7 @@ index 8b60d3c..2acf7bb 100644
                  if (blockState.is(Blocks.COMPARATOR)) {
                      this.neighborChanged(blockState, blockPos, block, null, false);
 diff --git a/net/minecraft/world/level/block/DetectorRailBlock.java b/net/minecraft/world/level/block/DetectorRailBlock.java
-index 73bc347..ec273a2 100644
+index e7a4fe5bcb750262d7beab8d57bec59038fca241..62b79ef88083d2672c49c1d273a6f6e523e7ce43 100644
 --- a/net/minecraft/world/level/block/DetectorRailBlock.java
 +++ b/net/minecraft/world/level/block/DetectorRailBlock.java
 @@ -128,8 +128,8 @@ public class DetectorRailBlock extends BaseRailBlock {
@@ -44,7 +37,7 @@ index 73bc347..ec273a2 100644
      }
  
 diff --git a/net/minecraft/world/level/block/PoweredRailBlock.java b/net/minecraft/world/level/block/PoweredRailBlock.java
-index e4c4a6b..abc39a3 100644
+index 1d1a2e183624ebae22b966ab59a174e941f139c0..44a70268fef73e2bcd5ac7d11e58645e915a7bb9 100644
 --- a/net/minecraft/world/level/block/PoweredRailBlock.java
 +++ b/net/minecraft/world/level/block/PoweredRailBlock.java
 @@ -102,8 +102,8 @@ public class PoweredRailBlock extends BaseRailBlock {
@@ -59,10 +52,10 @@ index e4c4a6b..abc39a3 100644
          } else {
              RailShape railShape = blockState.getValue(SHAPE);
 diff --git a/net/minecraft/world/level/block/RedStoneWireBlock.java b/net/minecraft/world/level/block/RedStoneWireBlock.java
-index fde784f..4b37335 100644
+index 56df64e48482b4caa7dc5dc843a18e6bc1e3bfa1..ba253a9af6141d8ea99c064e3cc0c6486c221098 100644
 --- a/net/minecraft/world/level/block/RedStoneWireBlock.java
 +++ b/net/minecraft/world/level/block/RedStoneWireBlock.java
-@@ -211,8 +211,9 @@ public class RedStoneWireBlock extends Block {
+@@ -210,8 +210,9 @@ public class RedStoneWireBlock extends Block {
          BlockPos.MutableBlockPos mutableBlockPos = new BlockPos.MutableBlockPos();
  
          for (Direction direction : Direction.Plane.HORIZONTAL) {
@@ -74,10 +67,10 @@ index fde784f..4b37335 100644
                  BlockState blockState = level.getBlockState(mutableBlockPos);
                  if (blockState.is(this)) {
 diff --git a/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java b/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
-index e7ea9df..285fa83 100644
+index 70b4c63b5ff80f7d26761f016ecccac760328297..4d46aec741ee8ac5d813ecd698950df2d13b962c 100644
 --- a/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
 +++ b/net/minecraft/world/level/redstone/CollectingNeighborUpdater.java
-@@ -122,7 +122,8 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
+@@ -134,7 +134,8 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
          public boolean runNext(Level level) {
              Direction direction = NeighborUpdater.UPDATE_ORDER[this.idx++];
              BlockPos blockPos = this.sourcePos.relative(direction);
@@ -87,7 +80,7 @@ index e7ea9df..285fa83 100644
              Orientation orientation = null;
              if (level.enabledFeatures().contains(FeatureFlags.REDSTONE_EXPERIMENTS)) {
                  if (this.orientation == null) {
-@@ -135,6 +136,7 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
+@@ -147,6 +148,7 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
              }
  
              NeighborUpdater.executeUpdate(level, blockState, blockPos, this.sourceBlock, orientation, false, this.sourcePos); // Paper - Add source block to BlockPhysicsEvent
@@ -95,7 +88,7 @@ index e7ea9df..285fa83 100644
              if (this.idx < NeighborUpdater.UPDATE_ORDER.length && NeighborUpdater.UPDATE_ORDER[this.idx] == this.skipDirection) {
                  this.idx++;
              }
-@@ -151,7 +153,9 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
+@@ -175,7 +177,9 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
          implements CollectingNeighborUpdater.NeighborUpdates {
          @Override
          public boolean runNext(Level level) {
@@ -104,8 +97,8 @@ index e7ea9df..285fa83 100644
 +            } // Folia - block updates in unloaded chunks
              return false;
          }
-     }
-@@ -159,8 +163,8 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
+ 
+@@ -188,8 +192,8 @@ public class CollectingNeighborUpdater implements NeighborUpdater {
      record SimpleNeighborUpdate(BlockPos pos, Block block, @Nullable Orientation orientation) implements CollectingNeighborUpdater.NeighborUpdates {
          @Override
          public boolean runNext(Level level) {
@@ -115,7 +108,4 @@ index e7ea9df..285fa83 100644
 +            if (blockState != null) NeighborUpdater.executeUpdate(level, blockState, this.pos, this.block, this.orientation, false);
              return false;
          }
-     }
--- 
-2.52.0.windows.1
-
+ 
