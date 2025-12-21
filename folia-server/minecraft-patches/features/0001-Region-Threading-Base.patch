@@ -744,7 +744,7 @@ index 467065e3b40df17f38716499259b46663c174fd0..01f24ac927661fa4b3895f66031c8b9d
              }
          }
 diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
-index c47e77ceb15948cbd4a2a370738843c02542f6c1..2abdaf3da3e4216d32113a0fae09ce2fa4d59aee 100644
+index 640548d78b87653871dd1f7b0f84574c5e205fe8..5068de75f6f38c0459b77eb7354ce9db2d251d2c 100644
 --- a/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
 +++ b/ca/spottedleaf/moonrise/patches/chunk_system/scheduling/ChunkTaskScheduler.java
 @@ -114,7 +114,7 @@ public final class ChunkTaskScheduler {
@@ -1331,7 +1331,7 @@ index 0000000000000000000000000000000000000000..bbd14cf34438a9366f5ff29f1acba428
 \ No newline at end of file
 diff --git a/io/papermc/paper/threadedregions/RegionizedData.java b/io/papermc/paper/threadedregions/RegionizedData.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..c5158e11aa198583a1be9d35181b9e4f3f4865cd
+index 0000000000000000000000000000000000000000..8e25ab1c8ae026e51ce4d711c9084fdfbede9856
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedData.java
 @@ -0,0 +1,235 @@
@@ -1342,7 +1342,7 @@ index 0000000000000000000000000000000000000000..c5158e11aa198583a1be9d35181b9e4f
 +import net.minecraft.server.level.ServerLevel;
 +import javax.annotation.Nullable;
 +import java.util.Objects;
-+import java.util.function.Supplier;
++import java.util.function.Function;
 +
 +/**
 + * Use to manage data that needs to be regionised.
@@ -1434,7 +1434,7 @@ index 0000000000000000000000000000000000000000..c5158e11aa198583a1be9d35181b9e4f
 +public final class RegionizedData<T> {
 +
 +    private final ServerLevel world;
-+    private final Supplier<T> initialValueSupplier;
++    private final Function<TickRegions.TickRegionData, T> initialValueSupplier;
 +    private final RegioniserCallback<T> callback;
 +
 +    /**
@@ -1456,14 +1456,14 @@ index 0000000000000000000000000000000000000000..c5158e11aa198583a1be9d35181b9e4f
 +     * @param supplier Initial value supplier used to lazy initialise region data.
 +     * @param callback Region callback to manage this regionised data.
 +     */
-+    public RegionizedData(final ServerLevel world, final Supplier<T> supplier, final RegioniserCallback<T> callback) {
++    public RegionizedData(final ServerLevel world, final Function<TickRegions.TickRegionData, T> supplier, final RegioniserCallback<T> callback) {
 +        this.world = world;
 +        this.initialValueSupplier = Objects.requireNonNull(supplier, "Supplier may not be null.");
 +        this.callback = Objects.requireNonNull(callback, "Regioniser callback may not be null.");
 +    }
 +
-+    T createNewValue() {
-+        return Objects.requireNonNull(this.initialValueSupplier.get(), "Initial value supplier may not return null");
++    T createNewValue(final TickRegions.TickRegionData regionData) {
++        return Objects.requireNonNull(this.initialValueSupplier.apply(regionData), "Initial value supplier may not return null");
 +    }
 +
 +    RegioniserCallback<T> getCallback() {
@@ -1573,15 +1573,15 @@ index 0000000000000000000000000000000000000000..c5158e11aa198583a1be9d35181b9e4f
 \ No newline at end of file
 diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..b29735af284493a011c0b3c1d07c7accce6fbde3
+index 0000000000000000000000000000000000000000..b3bc39ebe8d2f48d976de9cd4fcae46095523514
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedServer.java
-@@ -0,0 +1,487 @@
+@@ -0,0 +1,502 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
 +import ca.spottedleaf.concurrentutil.completable.Completable;
-+import ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool;
++import ca.spottedleaf.concurrentutil.util.TimeUtil;
 +import ca.spottedleaf.moonrise.common.util.TickThread;
 +import com.mojang.logging.LogUtils;
 +import io.papermc.paper.threadedregions.scheduler.FoliaGlobalRegionScheduler;
@@ -1648,7 +1648,7 @@ index 0000000000000000000000000000000000000000..b29735af284493a011c0b3c1d07c7acc
 +        // now we can schedule
 +        this.tickHandle.setInitialStart(System.nanoTime() + TickRegionScheduler.TIME_BETWEEN_TICKS);
 +        TickRegions.getScheduler().scheduleRegion(this.tickHandle);
-+        TickRegions.getScheduler().init();
++        TickRegions.start();
 +    }
 +
 +    public void invalidateStatus() {
@@ -1666,6 +1666,15 @@ index 0000000000000000000000000000000000000000..b29735af284493a011c0b3c1d07c7acc
 +
 +    public void notifyTasks() {
 +        TickRegions.getScheduler().setHasTasks(this.tickHandle);
++    }
++
++    private boolean hasAnyGlobalChunkTasks() {
++        for (final ServerLevel world : this.worlds) {
++            if (world.taskQueueRegionData.hasGlobalChunkTasks()) {
++                return true;
++            }
++        }
++        return false;
 +    }
 +
 +    public <T extends PacketListener> void schedulePacket(final T packetListener, final Packet<T> packet) {
@@ -1724,7 +1733,7 @@ index 0000000000000000000000000000000000000000..b29735af284493a011c0b3c1d07c7acc
 +        private final AtomicBoolean ticking = new AtomicBoolean();
 +
 +        public GlobalTickTickHandle(final RegionizedServer server) {
-+            super(null, SchedulerThreadPool.DEADLINE_NOT_SET);
++            super(null, TimeUtil.DEADLINE_NOT_SET);
 +            this.server = server;
 +        }
 +
@@ -1774,20 +1783,26 @@ index 0000000000000000000000000000000000000000..b29735af284493a011c0b3c1d07c7acc
 +            return this.server.packetProcessor.executeSinglePacket();
 +        }
 +
++        private boolean runGlobalTask() {
++            boolean ret = false;
++            for (final ServerLevel world : this.server.worlds) {
++                ret |= world.taskQueueRegionData.executeGlobalChunkTask();
++            }
++            return ret;
++        }
++
 +        @Override
-+        protected boolean runRegionTasks(final BooleanSupplier canContinue) {
++        protected void runRegionTasks(final BooleanSupplier canContinue) {
 +            do {
-+                if (!this.runOneTask() && !this.runOnePacketTask()) {
-+                    return false;
++                if (!this.runOneTask() && !this.runOnePacketTask() && !this.runGlobalTask()) {
++                    return;
 +                }
 +            } while (canContinue.getAsBoolean());
-+
-+            return true;
 +        }
 +
 +        @Override
 +        protected boolean hasIntermediateTasks() {
-+            return !this.server.globalTickQueue.isEmpty() || this.server.packetProcessor.hasPackets();
++            return !this.server.globalTickQueue.isEmpty() || this.server.packetProcessor.hasPackets() || this.server.hasAnyGlobalChunkTasks();
 +        }
 +    }
 +
@@ -2067,10 +2082,10 @@ index 0000000000000000000000000000000000000000..b29735af284493a011c0b3c1d07c7acc
 \ No newline at end of file
 diff --git a/io/papermc/paper/threadedregions/RegionizedTaskQueue.java b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..3c54f7ca5455912b442cf07953d3845d854ee628
+index 0000000000000000000000000000000000000000..40ee051e2267cc497232ea4103e06616995a2f10
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedTaskQueue.java
-@@ -0,0 +1,831 @@
+@@ -0,0 +1,847 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
@@ -2153,7 +2168,11 @@ index 0000000000000000000000000000000000000000..3c54f7ca5455912b442cf07953d3845d
 +            this.world = world;
 +        }
 +
-+        private boolean executeGlobalChunkTask() {
++        public boolean hasGlobalChunkTasks() {
++            return !this.globalChunkTask.isEmpty();
++        }
++
++        public boolean executeGlobalChunkTask() {
 +            final Runnable run = this.globalChunkTask.poll();
 +            if (run != null) {
 +                run.run();
@@ -2168,6 +2187,7 @@ index 0000000000000000000000000000000000000000..3c54f7ca5455912b442cf07953d3845d
 +
 +        public void pushGlobalChunkTask(final Runnable run) {
 +            this.globalChunkTask.add(run);
++            RegionizedServer.getInstance().notifyTasks();
 +        }
 +
 +        private PrioritisedQueue getQueue(final boolean synchronise, final int chunkX, final int chunkZ, final boolean isChunkTask) {
@@ -2298,12 +2318,14 @@ index 0000000000000000000000000000000000000000..3c54f7ca5455912b442cf07953d3845d
 +    }
 +
 +    public static final class RegionTaskQueueData {
-+        private final PrioritisedQueue tickTaskQueue = new PrioritisedQueue();
-+        private final PrioritisedQueue chunkQueue = new PrioritisedQueue();
++        private final PrioritisedQueue tickTaskQueue = new PrioritisedQueue(this);
++        private final PrioritisedQueue chunkQueue = new PrioritisedQueue(this);
 +        private final WorldRegionTaskData worldRegionTaskData;
++        private final TickRegions.TickRegionData regionData;
 +
-+        public RegionTaskQueueData(final WorldRegionTaskData worldRegionTaskData) {
++        public RegionTaskQueueData(final WorldRegionTaskData worldRegionTaskData, final TickRegions.TickRegionData regionData) {
 +            this.worldRegionTaskData = worldRegionTaskData;
++            this.regionData = regionData;
 +        }
 +
 +        void mergeInto(final RegionTaskQueueData into) {
@@ -2363,6 +2385,13 @@ index 0000000000000000000000000000000000000000..3c54f7ca5455912b442cf07953d3845d
 +                this.queues[i] = new ArrayDeque<>();
 +            }
 +        }
++
++        private final RegionTaskQueueData queue;
++
++        private PrioritisedQueue(final RegionTaskQueueData queue) {
++            this.queue = queue;
++        }
++
 +        private boolean isDestroyed;
 +
 +        public int getScheduledTasks() {
@@ -2691,6 +2720,8 @@ index 0000000000000000000000000000000000000000..3c54f7ca5455912b442cf07953d3845d
 +                        continue;
 +                    }
 +
++                    queue.queue.regionData.setHasTasks();
++
 +                    // successfully queued
 +                    return true;
 +                }
@@ -2905,10 +2936,10 @@ index 0000000000000000000000000000000000000000..3c54f7ca5455912b442cf07953d3845d
 \ No newline at end of file
 diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496ace5b8a2c
+index 0000000000000000000000000000000000000000..1f49d787ecee4ba9dce087036a4e3cbce2228c17
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
-@@ -0,0 +1,771 @@
+@@ -0,0 +1,777 @@
 +package io.papermc.paper.threadedregions;
 +
 +import ca.spottedleaf.moonrise.common.list.IteratorSafeOrderedReferenceSet;
@@ -2933,7 +2964,6 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +import net.minecraft.network.protocol.common.ClientboundDisconnectPacket;
 +import net.minecraft.server.MinecraftServer;
 +import net.minecraft.server.level.ChunkHolder;
-+import net.minecraft.server.level.ServerChunkCache;
 +import net.minecraft.server.level.ServerLevel;
 +import net.minecraft.server.level.ServerPlayer;
 +import net.minecraft.server.network.ServerGamePacketListenerImpl;
@@ -2944,7 +2974,6 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +import net.minecraft.world.entity.item.ItemEntity;
 +import net.minecraft.world.level.BlockEventData;
 +import net.minecraft.world.level.ChunkPos;
-+import net.minecraft.world.level.Explosion;
 +import net.minecraft.world.level.Level;
 +import net.minecraft.world.level.NaturalSpawner;
 +import net.minecraft.world.level.ServerExplosion;
@@ -2957,7 +2986,6 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +import net.minecraft.world.level.material.Fluid;
 +import net.minecraft.world.level.pathfinder.PathTypeCache;
 +import net.minecraft.world.level.redstone.CollectingNeighborUpdater;
-+import net.minecraft.world.level.redstone.NeighborUpdater;
 +import net.minecraft.world.ticks.LevelTicks;
 +import org.bukkit.craftbukkit.block.CraftBlockState;
 +import org.slf4j.Logger;
@@ -2972,6 +3000,7 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +import java.util.List;
 +import java.util.Map;
 +import java.util.Set;
++import java.util.concurrent.CopyOnWriteArrayList;
 +import java.util.function.Consumer;
 +import java.util.function.Predicate;
 +
@@ -2993,6 +3022,7 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +            // entities
 +            for (final ServerPlayer player : from.localPlayers) {
 +                into.localPlayers.add(player);
++                player.getBukkitEntity().updateRegion(into);
 +                into.nearbyPlayers.addPlayer(player);
 +            }
 +            for (final Entity entity : from.allEntities) {
@@ -3092,6 +3122,7 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +                // the chunk holder must _exist_, and so the region section exists.
 +                final RegionizedWorldData into = regionToData.get(CoordinateUtils.getChunkKey(pos.x >> chunkToRegionShift, pos.z >> chunkToRegionShift));
 +                into.localPlayers.add(player);
++                player.getBukkitEntity().updateRegion(into);
 +                into.nearbyPlayers.addPlayer(player);
 +            }
 +            for (final Entity entity : from.allEntities) {
@@ -3259,7 +3290,8 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +    }
 +
 +    // entities
-+    private final List<ServerPlayer> localPlayers = new ArrayList<>();
++    // this is copy on write to allow packet processing to iterate safely
++    private final CopyOnWriteArrayList<ServerPlayer> localPlayers = new CopyOnWriteArrayList<>();
 +    private final NearbyPlayers nearbyPlayers;
 +    public final io.papermc.paper.threadedregions.EntityScheduler.EntitySchedulerTickList entitySchedulerTickList = new io.papermc.paper.threadedregions.EntityScheduler.EntitySchedulerTickList();
 +    private final ReferenceList<Entity> allEntities = new ReferenceList<>(EMPTY_ENTITY_ARRAY);
@@ -3358,7 +3390,9 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +    public final alternate.current.wire.WireHandler wireHandler;
 +    public final io.papermc.paper.redstone.RedstoneWireTurbo turbo;
 +
-+    public RegionizedWorldData(final ServerLevel world) {
++    public final TickRegions.TickRegionData regionData;
++
++    public RegionizedWorldData(final ServerLevel world, final TickRegions.TickRegionData regionData) {
 +        this.world = world;
 +        this.blockLevelTicks = new LevelTicks<>(world::isPositionTickingWithEntitiesLoaded, world, true);
 +        this.fluidLevelTicks = new LevelTicks<>(world::isPositionTickingWithEntitiesLoaded, world, false);
@@ -3366,6 +3400,7 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +        this.nearbyPlayers = new NearbyPlayers(world);
 +        this.wireHandler = new alternate.current.wire.WireHandler(world);
 +        this.turbo = new io.papermc.paper.redstone.RedstoneWireTurbo((RedStoneWireBlock)Blocks.REDSTONE_WIRE);
++        this.regionData = regionData;
 +
 +        // tasks may be drained before the region ticks, so we must set up the tick data early just in case
 +        this.updateTickData();
@@ -3523,6 +3558,7 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +        if (this.allEntities.add(entity)) {
 +            if (entity instanceof ServerPlayer player) {
 +                this.localPlayers.add(player);
++                player.getBukkitEntity().updateRegion(this);
 +            }
 +            TickRegions.RegionStats.updateCurrentRegion();
 +        }
@@ -3539,6 +3575,7 @@ index 0000000000000000000000000000000000000000..30a3a09247c6229580a4e0a5bc8a496a
 +        if (this.allEntities.remove(entity)) {
 +            if (entity instanceof ServerPlayer player) {
 +                this.localPlayers.remove(player);
++                player.getBukkitEntity().updateRegion(null);
 +            }
 +            TickRegions.RegionStats.updateCurrentRegion();
 +        }
@@ -5282,19 +5319,25 @@ index 0000000000000000000000000000000000000000..604385af903845d966382ad0a4168798
 \ No newline at end of file
 diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e07b284bc
+index 0000000000000000000000000000000000000000..ffb6d2ef658bc658eaf7d26d9d20590fc94432e2
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
-@@ -0,0 +1,494 @@
+@@ -0,0 +1,561 @@
 +package io.papermc.paper.threadedregions;
 +
-+import ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool;
++import ca.spottedleaf.concurrentutil.numa.OSNuma;
++import ca.spottedleaf.concurrentutil.scheduler.EDFSchedulerThreadPool;
++import ca.spottedleaf.concurrentutil.scheduler.SchedulableTick;
++import ca.spottedleaf.concurrentutil.scheduler.Scheduler;
++import ca.spottedleaf.concurrentutil.scheduler.StealingScheduledThreadPool;
 +import ca.spottedleaf.concurrentutil.util.TimeUtil;
 +import ca.spottedleaf.moonrise.common.time.TickData;
 +import ca.spottedleaf.moonrise.common.time.TickTime;
++import ca.spottedleaf.moonrise.common.util.MoonriseConstants;
 +import ca.spottedleaf.moonrise.common.util.TickThread;
 +import com.mojang.logging.LogUtils;
 +import io.papermc.paper.util.TraceUtil;
++import it.unimi.dsi.fastutil.ints.Int2IntLinkedOpenHashMap;
 +import net.minecraft.server.MinecraftServer;
 +import net.minecraft.server.level.ServerLevel;
 +import net.minecraft.world.level.ChunkPos;
@@ -5324,23 +5367,83 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +    public static final int TICK_RATE = 20;
 +    public static final long TIME_BETWEEN_TICKS = 1_000_000_000L / TICK_RATE; // ns
 +
-+    private final SchedulerThreadPool scheduler;
++    private final Scheduler scheduler;
 +
-+    public TickRegionScheduler(final int threads) {
-+        this.scheduler = new SchedulerThreadPool(threads, new ThreadFactory() {
++    public static enum SchedulerType {
++        EDF,
++        WORK_STEALING;
++    }
++
++    public TickRegionScheduler(final SchedulerType schedulerType, final int initialThreads) {
++        final ThreadFactory threadFactory = new ThreadFactory() {
 +            private final AtomicInteger idGenerator = new AtomicInteger();
++            // on Linux, thread affinity is copied from the parent thread - but we do not want that, so we need
++            // to adjust the thread affinity of child threads
++            // the group allows the numa instance to accurately collect the child threads
++            private final ThreadGroup threadGroup = new ThreadGroup("Folia Region Scheduler ThreadGroup");
 +
 +            @Override
 +            public Thread newThread(final Runnable run) {
-+                final Thread ret = new TickThreadRunner(run, "Region Scheduler Thread #" + this.idGenerator.getAndIncrement());
++                final Thread ret = new TickThreadRunner(this.threadGroup, run, "Folia Region Scheduler Thread #" + this.idGenerator.getAndIncrement());
 +                ret.setUncaughtExceptionHandler(TickRegionScheduler.this::uncaughtException);
 +                return ret;
 +            }
-+        });
++        };
++
++        switch (schedulerType) {
++            case EDF: {
++                this.scheduler = new EDFSchedulerThreadPool(initialThreads, threadFactory);
++                break;
++            }
++            case WORK_STEALING: {
++                this.scheduler = new StealingScheduledThreadPool(
++                        threadFactory, MoonriseConstants.NUMA_ENABLE ? OSNuma.getNativeInstance() : OSNuma.NoOp.INSTANCE
++                );
++                ((StealingScheduledThreadPool)this.scheduler).setFlags(StealingScheduledThreadPool.FLAG_SCHEDULE_EVENLY);
++                break;
++            }
++            default: {
++                throw new IllegalStateException("Unknown scheduler type: " + schedulerType);
++            }
++        }
++    }
++
++    public void start() {
++        if (this.scheduler instanceof EDFSchedulerThreadPool edfSchedulerThreadPool) {
++            edfSchedulerThreadPool.start();
++        }
++    }
++
++    public void setThreads(final int threads) {
++        if (this.scheduler instanceof StealingScheduledThreadPool stealingScheduledThreadPool) {
++            final Int2IntLinkedOpenHashMap threadAllocation;
++            final long stealThresholdNS = TimeUnit.MILLISECONDS.toNanos(3L);
++            final long taskTimeSliceNS = TimeUnit.MILLISECONDS.toNanos(2L);
++
++            if (!MoonriseConstants.NUMA_ENABLE) {
++                threadAllocation = new Int2IntLinkedOpenHashMap();
++                threadAllocation.put(0, threads);
++
++                LOGGER.info("Folia is using " + threads + " tick threads");
++            } else {
++                final int nodes = stealingScheduledThreadPool.getNuma().getTotalNumaNodes();
++
++                final int threadsPerNode = Math.max(1, threads / nodes);
++
++                threadAllocation = new Int2IntLinkedOpenHashMap(nodes);
++                for (int i = 0; i < nodes; ++i) {
++                    threadAllocation.put(i, threadsPerNode);
++                }
++
++                LOGGER.info("Folia is using " + threadsPerNode + " tick threads per NUMA node, with " + nodes + " NUMA nodes detected");
++            }
++
++            stealingScheduledThreadPool.setThreadAllocation(threadAllocation, stealThresholdNS, taskTimeSliceNS);
++        }
 +    }
 +
 +    public int getTotalThreadCount() {
-+        return this.scheduler.getThreads().length;
++        return this.scheduler.getAliveThreads().length;
 +    }
 +
 +    private static void setTickingRegion(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
@@ -5362,7 +5465,7 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +        }
 +    }
 +
-+    private static void setTickTask(final SchedulerThreadPool.SchedulableTick task) {
++    private static void setTickTask(final SchedulableTick task) {
 +        final Thread currThread = Thread.currentThread();
 +        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
 +            throw new IllegalStateException("Must be tick thread runner");
@@ -5405,7 +5508,7 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +     * Returns the current ticking task, or {@code null} if there is no ticking region.
 +     * If this thread is not a TickThread, then returns {@code null}.
 +     */
-+    public static SchedulerThreadPool.SchedulableTick getCurrentTickingTask() {
++    public static SchedulableTick getCurrentTickingTask() {
 +        final Thread currThread = Thread.currentThread();
 +        if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
 +            return null;
@@ -5432,22 +5535,17 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +        region.markNonSchedulable();
 +    }
 +
-+    /**
-+     * Updates the tick start to the farthest into the future of its current scheduled time and the
-+     * provided time.
-+     * @return {@code false} if the region was not scheduled or is currently ticking or the specified time is less-than its
-+     *                       current start time, {@code true} if the next tick start was adjusted.
-+     */
-+    public boolean updateTickStartToMax(final RegionScheduleHandle region, final long newStart) {
-+        return this.scheduler.updateTickStartToMax(region, newStart);
-+    }
-+
 +    public boolean halt(final boolean sync, final long maxWaitNS) {
-+        return this.scheduler.halt(sync, maxWaitNS);
++        this.scheduler.halt();
++        if (!sync) {
++            return this.scheduler.getAliveThreads().length == 0;
++        }
++
++        return this.scheduler.join(maxWaitNS == 0L ? 0L : Math.max(1L, TimeUnit.NANOSECONDS.toMillis(maxWaitNS)));
 +    }
 +
 +    void dumpAliveThreadTraces(final String reason) {
-+        for (final Thread thread : this.scheduler.getThreads()) {
++        for (final Thread thread : this.scheduler.getAliveThreads()) {
 +            if (thread.isAlive()) {
 +                TraceUtil.dumpTraceForThread(thread, reason);
 +            }
@@ -5458,16 +5556,12 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +        this.scheduler.notifyTasks(region);
 +    }
 +
-+    public void init() {
-+        this.scheduler.start();
-+    }
-+
 +    private void uncaughtException(final Thread thread, final Throwable thr) {
 +        LOGGER.error("Uncaught exception in tick thread \"" + thread.getName() + "\"", thr);
 +
 +        // prevent further ticks from occurring
 +        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
-+        this.scheduler.halt(false, 0L);
++        this.scheduler.halt();
 +
 +        MinecraftServer.getServer().stopServer();
 +    }
@@ -5477,7 +5571,7 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +
 +        // prevent further ticks from occurring
 +        // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
-+        this.scheduler.halt(false, 0L);
++        this.scheduler.halt();
 +
 +        final ChunkPos center = handle.region == null ? null : handle.region.region.getCenterChunk();
 +        final ServerLevel world = handle.region == null ? null : handle.region.world;
@@ -5493,14 +5587,14 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +
 +        private ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> currentTickingRegion;
 +        private RegionizedWorldData currentTickingWorldRegionizedData;
-+        private SchedulerThreadPool.SchedulableTick currentTickingTask;
++        private SchedulableTick currentTickingTask;
 +
-+        public TickThreadRunner(final Runnable run, final String name) {
-+            super(run, name);
++        public TickThreadRunner(final ThreadGroup group, final Runnable run, final String name) {
++            super(group, run, name);
 +        }
 +    }
 +
-+    public static abstract class RegionScheduleHandle extends SchedulerThreadPool.SchedulableTick {
++    public static abstract class RegionScheduleHandle extends SchedulableTick {
 +
 +        protected long currentTick;
 +        protected long lastTickStart;
@@ -5511,6 +5605,8 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +        protected final TickData tickTimes5m;
 +        protected final TickData tickTimes15m;
 +        protected TickTime currentTickData;
++        protected long intermediateTaskTime = 0L;
++        protected long intermediateTaskTimeCPU = 0L;
 +        protected Thread currentTickingThread;
 +
 +        public final TickRegions.TickRegionData region;
@@ -5522,7 +5618,7 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +
 +        public RegionScheduleHandle(final TickRegions.TickRegionData region, final long firstStart) {
 +            this.currentTick = 0L;
-+            this.lastTickStart = SchedulerThreadPool.DEADLINE_NOT_SET;
++            this.lastTickStart = TimeUtil.DEADLINE_NOT_SET;
 +            this.tickTimes5s = new TickData(TimeUnit.SECONDS.toNanos(5L));
 +            this.tickTimes15s = new TickData(TimeUnit.SECONDS.toNanos(15L));
 +            this.tickTimes1m = new TickData(TimeUnit.MINUTES.toNanos(1L));
@@ -5531,16 +5627,16 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +            this.region = region;
 +
 +            this.setScheduledStart(firstStart);
-+            this.tickSchedule = new Schedule(firstStart == SchedulerThreadPool.DEADLINE_NOT_SET ? firstStart : firstStart - TIME_BETWEEN_TICKS);
++            this.tickSchedule = new Schedule(firstStart == TimeUtil.DEADLINE_NOT_SET ? firstStart : firstStart - TIME_BETWEEN_TICKS);
 +        }
 +
 +        /**
-+         * Subclasses should call this instead of {@link ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool.SchedulableTick#setScheduledStart(long)}
++         * Subclasses should call this instead of {@link #setScheduledStart(long)}
 +         * so that the tick schedule and scheduled start remain synchronised
 +         */
 +        protected final void updateScheduledStart(final long to) {
 +            this.setScheduledStart(to);
-+            this.tickSchedule.setLastPeriod(to == SchedulerThreadPool.DEADLINE_NOT_SET ? to : to - TIME_BETWEEN_TICKS);
++            this.tickSchedule.setLastPeriod(to == TimeUtil.DEADLINE_NOT_SET ? to : to - TIME_BETWEEN_TICKS);
 +        }
 +
 +        public final void markNonSchedulable() {
@@ -5557,7 +5653,7 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +
 +        protected abstract void tickRegion(final int tickCount, final long startTime, final long scheduledEnd);
 +
-+        protected abstract boolean runRegionTasks(final BooleanSupplier canContinue);
++        protected abstract void runRegionTasks(final BooleanSupplier canContinue);
 +
 +        protected abstract boolean hasIntermediateTasks();
 +
@@ -5567,9 +5663,9 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +        }
 +
 +        @Override
-+        public final Boolean runTasks(final BooleanSupplier canContinue) {
++        public final boolean runTasks(final BooleanSupplier canContinue) {
 +            if (this.cancelled.get()) {
-+                return null;
++                return false;
 +            }
 +
 +            final long cpuStart = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
@@ -5580,7 +5676,7 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +                    throw new IllegalStateException("Scheduled region should be acquirable");
 +                }
 +                // region was killed
-+                return null;
++                return false;
 +            }
 +
 +            TickRegionScheduler.setTickTask(this);
@@ -5589,33 +5685,33 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +            }
 +
 +            synchronized (this) {
-+                this.currentTickData = null; // TODO how to handle this?
 +                this.currentTickingThread = Thread.currentThread();
 +            }
 +
-+            final boolean ret;
 +            try {
-+                ret = this.runRegionTasks(() -> {
++                this.runRegionTasks(() -> {
 +                    return !RegionScheduleHandle.this.cancelled.get() && canContinue.getAsBoolean();
 +                });
 +            } catch (final Throwable thr) {
 +                this.scheduler.regionFailed(this, true, thr);
 +                // don't release region for another tick
-+                return null;
++                return false;
 +            } finally {
 +                final long tickEnd = System.nanoTime();
 +                final long cpuEnd = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
 +
-+                final TickTime time = null; // TODO how to handle this?
++                synchronized (this) {
++                    this.intermediateTaskTime += (tickEnd - tickStart);
++                    this.intermediateTaskTimeCPU += (cpuEnd - cpuStart);
++                }
 +
-+                this.addTickTime(time);
 +                TickRegionScheduler.setTickTask(null);
 +                if (this.region != null) {
 +                    TickRegionScheduler.setTickingRegion(null);
 +                }
 +            }
 +
-+            return !this.markNotTicking() || this.cancelled.get() ? null : Boolean.valueOf(ret);
++            return this.markNotTicking() && !this.cancelled.get();
 +        }
 +
 +        @Override
@@ -5656,11 +5752,19 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +            final long scheduledStart = this.getScheduledStart();
 +            final long scheduledEnd = scheduledStart + TIME_BETWEEN_TICKS;
 +
++            final long intermediateTaskTime;
++            final long intermediateTaskTimeCPU;
++
 +            synchronized (this) {
++                intermediateTaskTime = this.intermediateTaskTime;
++                intermediateTaskTimeCPU = this.intermediateTaskTimeCPU;
++                this.intermediateTaskTime = 0L;
++                this.intermediateTaskTimeCPU = 0L;
++
 +                this.currentTickData = new TickTime(
 +                    lastTickStart, scheduledStart, tickStart, cpuStart,
-+                    SchedulerThreadPool.DEADLINE_NOT_SET, SchedulerThreadPool.DEADLINE_NOT_SET,
-+                    0L, 0L, // TODO intermediate task execution
++                    TimeUtil.DEADLINE_NOT_SET, TimeUtil.DEADLINE_NOT_SET,
++                    intermediateTaskTime, intermediateTaskTimeCPU,
 +                    MEASURE_CPU_TIME
 +                );
 +                this.currentTickingThread = Thread.currentThread();
@@ -5685,7 +5789,7 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +
 +                final TickTime time = new TickTime(
 +                    lastTickStart, scheduledStart, tickStart, cpuStart, tickEnd, cpuEnd,
-+                    0L, 0L, // TODO intermediate task execution
++                    intermediateTaskTime, intermediateTaskTimeCPU,
 +                    MEASURE_CPU_TIME
 +                );
 +
@@ -5782,17 +5886,18 @@ index 0000000000000000000000000000000000000000..615f30ce344455112088220a953ad78e
 +}
 \ No newline at end of file
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5e97a87d8 100644
+index 8424cf9d4617b4732d44cc460d25b04481068989..40d2883d86a43175b49260bd2cb17459cc329639 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -1,10 +1,411 @@
+@@ -1,10 +1,486 @@
  package io.papermc.paper.threadedregions;
  
 -// placeholder class for Folia
 -public class TickRegions {
-+import ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool;
++import ca.spottedleaf.concurrentutil.numa.OSNuma;
 +import ca.spottedleaf.concurrentutil.util.TimeUtil;
 +import ca.spottedleaf.moonrise.common.time.TickTime;
++import ca.spottedleaf.moonrise.common.util.TickThread;
 +import ca.spottedleaf.moonrise.patches.chunk_system.scheduling.ChunkHolderManager;
 +import com.mojang.logging.LogUtils;
 +import io.papermc.paper.configuration.GlobalConfiguration;
@@ -5801,11 +5906,14 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
 +import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 +import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
++import net.minecraft.network.PacketProcessor;
 +import net.minecraft.server.MinecraftServer;
 +import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.level.ServerPlayer;
 +import org.slf4j.Logger;
 +import java.util.Iterator;
 +import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicBoolean;
 +import java.util.concurrent.atomic.AtomicInteger;
 +import java.util.concurrent.atomic.AtomicLong;
 +import java.util.function.BooleanSupplier;
@@ -5821,25 +5929,17 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +    }
 +
 +    private static boolean initialised;
++    private static boolean started;
 +    private static TickRegionScheduler scheduler;
 +
 +    public static TickRegionScheduler getScheduler() {
 +        return scheduler;
 +    }
 +
-+    public static void init(final GlobalConfiguration.ThreadedRegions config) {
-+        if (initialised) {
-+            return;
-+        }
-+        initialised = true;
-+        int gridExponent = config.gridExponent;
-+        gridExponent = Math.max(0, gridExponent);
-+        gridExponent = Math.min(31, gridExponent);
-+        regionShift = gridExponent;
-+
++    private static int getTickThreads(final GlobalConfiguration.ThreadedRegions config) {
 +        int tickThreads;
 +        if (config.threads <= 0) {
-+            tickThreads = Runtime.getRuntime().availableProcessors() / 2;
++            tickThreads = OSNuma.getNativeInstance().getTotalCores() / 2;
 +            if (tickThreads <= 4) {
 +                tickThreads = 1;
 +            } else {
@@ -5849,9 +5949,34 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +            tickThreads = config.threads;
 +        }
 +
-+        scheduler = new TickRegionScheduler(tickThreads);
-+        LOGGER.info("Regionised ticking is enabled with " + tickThreads + " tick threads");
++        return tickThreads;
 +    }
++
++    public static void init(final GlobalConfiguration.ThreadedRegions config) {
++        final int tickThreads = getTickThreads(config);
++        if (initialised) {
++            if (started) {
++                scheduler.setThreads(tickThreads);
++            }
++            return;
++        }
++        initialised = true;
++        int gridExponent = config.gridExponent;
++        gridExponent = Math.max(0, gridExponent);
++        gridExponent = Math.min(31, gridExponent);
++        regionShift = gridExponent;
++        scheduler = new TickRegionScheduler(config.scheduler, tickThreads);
++        LOGGER.info("Initialised " + config.scheduler + " Folia scheduler with initial " + tickThreads + " target thread(s)");
++    }
++
++    public static void start() {
++        if (started) {
++            throw new IllegalStateException("Already started");
++        }
++        started = true;
++        scheduler.setThreads(getTickThreads(GlobalConfiguration.get().threadedRegions));
++        scheduler.start();
++     }
 +
 +    @Override
 +    public TickRegionData createNewData(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
@@ -5861,8 +5986,8 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +    @Override
 +    public TickRegionSectionData createNewSectionData(final int sectionX, final int sectionZ, final int sectionShift) {
 +        return null;
-+    }
-+
+     }
+ 
 +    @Override
 +    public void onRegionCreate(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
 +        final TickRegionData data = region.getData();
@@ -5948,7 +6073,7 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +        private final Reference2ReferenceOpenHashMap<RegionizedData<?>, Object> regionizedData = new Reference2ReferenceOpenHashMap<>();
 +
 +        // tick data
-+        private ConcreteRegionTickHandle tickHandle = new ConcreteRegionTickHandle(this, SchedulerThreadPool.DEADLINE_NOT_SET);
++        private ConcreteRegionTickHandle tickHandle = new ConcreteRegionTickHandle(this, TimeUtil.DEADLINE_NOT_SET);
 +
 +        // queue data
 +        private final RegionizedTaskQueue.RegionTaskQueueData taskQueueData;
@@ -5959,11 +6084,59 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +        // async-safe read-only region data
 +        private final RegionStats regionStats;
 +
++        private final AtomicBoolean hasPackets = new AtomicBoolean(false);
++
 +        private TickRegionData(final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region) {
 +            this.region = region;
 +            this.world = region.regioniser.world;
-+            this.taskQueueData = new RegionizedTaskQueue.RegionTaskQueueData(this.world.taskQueueRegionData);
++            this.taskQueueData = new RegionizedTaskQueue.RegionTaskQueueData(this.world.taskQueueRegionData, this);
 +            this.regionStats = new RegionStats();
++        }
++
++        public void setHasTasks() {
++            TickRegions.getScheduler().setHasTasks(this.tickHandle);
++        }
++
++        public void setHasPackets() {
++            if (!this.hasPackets.get() && !this.hasPackets.compareAndExchange(false, true)) {
++                this.setHasTasks();
++            }
++        }
++
++        public boolean drainOnePacket() {
++            if (!this.hasPackets.get()) {
++                return false;
++            }
++
++            final RegionizedWorldData worldData = this.world.getCurrentWorldData();
++            boolean hasPacketsNew = false;
++
++            for (final ServerPlayer player : worldData.getLocalPlayers()) {
++                final PacketProcessor packetProcessor = player.getBukkitEntity().packetProcessor;
++                if (!packetProcessor.hasPackets()) {
++                    continue;
++                }
++                if (!TickThread.isTickThreadFor(player)) {
++                    continue;
++                }
++                if (packetProcessor.executeSinglePacket()) {
++                    hasPacketsNew |= packetProcessor.hasPackets();
++                }
++            }
++
++            if (!hasPacketsNew) {
++                this.hasPackets.set(false);
++
++                // handle race condition: packet added during packet processing
++                for (final ServerPlayer player : worldData.getLocalPlayers()) {
++                    if (player.getBukkitEntity().packetProcessor.hasPackets()) {
++                        this.hasPackets.set(true);
++                        break;
++                    }
++                }
++            }
++
++            return true;
 +        }
 +
 +        public RegionStats getRegionStats() {
@@ -5999,7 +6172,7 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +                return ret;
 +            }
 +
-+            ret = regionizedData.createNewValue();
++            ret = regionizedData.createNewValue(this);
 +            this.regionizedData.put(regionizedData, ret);
 +
 +            return ret;
@@ -6017,6 +6190,10 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +            for (final ThreadedRegionizer.ThreadedRegion<TickRegionData, TickRegionSectionData> region : regions) {
 +                final TickRegionData data = region.getData();
 +                data.tickHandle.copyDeadlineAndTickCount(this.tickHandle);
++                // just be lazy about this one, it's not very important
++                if (this.hasPackets.getOpaque()) {
++                    data.hasPackets.setOpaque(true);
++                }
 +            }
 +
 +            // generic regionised data
@@ -6084,6 +6261,10 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +            // there's not really a great solution to the tick problem, no matter what it'll be messed up
 +            // we will pick the greatest time delay so that tps will not exceed TICK_RATE
 +            data.tickHandle.updateSchedulingToMax(this.tickHandle);
++            // just be lazy about this one, it's not very important
++            if (this.hasPackets.getOpaque()) {
++                data.hasPackets.setOpaque(true);
++            }
 +
 +            // generic regionised data
 +            final long fromTickOffset = currentTickTo - currentTickFrom; // see merge jd
@@ -6125,11 +6306,11 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +        }
 +
 +        private void updateSchedulingToMax(final ConcreteRegionTickHandle from) {
-+            if (from.getScheduledStart() == SchedulerThreadPool.DEADLINE_NOT_SET) {
++            if (from.getScheduledStart() == TimeUtil.DEADLINE_NOT_SET) {
 +                return;
 +            }
 +
-+            if (this.getScheduledStart() == SchedulerThreadPool.DEADLINE_NOT_SET) {
++            if (this.getScheduledStart() == TimeUtil.DEADLINE_NOT_SET) {
 +                this.updateScheduledStart(from.getScheduledStart());
 +                return;
 +            }
@@ -6140,7 +6321,7 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +        private void copyDeadlineAndTickCount(final ConcreteRegionTickHandle from) {
 +            this.currentTick = from.currentTick;
 +
-+            if (from.getScheduledStart() == SchedulerThreadPool.DEADLINE_NOT_SET) {
++            if (from.getScheduledStart() == TimeUtil.DEADLINE_NOT_SET) {
 +                return;
 +            }
 +
@@ -6149,7 +6330,7 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +        }
 +
 +        private void checkInitialSchedule() {
-+            if (this.getScheduledStart() == SchedulerThreadPool.DEADLINE_NOT_SET) {
++            if (this.getScheduledStart() == TimeUtil.DEADLINE_NOT_SET) {
 +                this.updateScheduledStart(System.nanoTime() + TickRegionScheduler.TIME_BETWEEN_TICKS);
 +            }
 +        }
@@ -6170,35 +6351,33 @@ index 8424cf9d4617b4732d44cc460d25b04481068989..312a98beecb95153cd10424c1c44f0d5
 +        }
 +
 +        @Override
-+        protected boolean runRegionTasks(final BooleanSupplier canContinue) {
++        protected void runRegionTasks(final BooleanSupplier canContinue) {
 +            final RegionizedTaskQueue.RegionTaskQueueData queue = this.region.taskQueueData;
 +
 +            boolean processedChunkTask = false;
 +
-+            boolean executeChunkTask = true;
-+            boolean executeTickTask = true;
++            boolean executeChunkTask;
++            boolean executeTickTask;
++            boolean executePacketTask;
 +            do {
-+                if (executeTickTask) {
-+                    executeTickTask = queue.executeTickTask();
-+                }
-+                if (executeChunkTask) {
-+                    processedChunkTask |= (executeChunkTask = queue.executeChunkTask());
-+                }
-+            } while ((executeChunkTask | executeTickTask) && canContinue.getAsBoolean());
++                executeTickTask = queue.executeTickTask();
++                executeChunkTask = queue.executeChunkTask();
++                executePacketTask = this.region.drainOnePacket();
++
++                processedChunkTask |= executeChunkTask;
++            } while ((executeChunkTask | executeTickTask | executePacketTask) && canContinue.getAsBoolean());
 +
 +            if (processedChunkTask) {
 +                // if we processed any chunk tasks, try to process ticket level updates for full status changes
 +                this.region.world.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates();
 +            }
-+            return true;
 +        }
 +
 +        @Override
 +        protected boolean hasIntermediateTasks() {
-+            return this.region.taskQueueData.hasTasks();
++            return this.region.taskQueueData.hasTasks() || this.region.hasPackets.get();
 +        }
-     }
- 
++    }
  }
 diff --git a/io/papermc/paper/threadedregions/commands/CommandServerHealth.java b/io/papermc/paper/threadedregions/commands/CommandServerHealth.java
 new file mode 100644
@@ -6691,10 +6870,10 @@ index 0000000000000000000000000000000000000000..7939cb85e13c00740adb2614d6a1733b
 \ No newline at end of file
 diff --git a/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java b/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
 new file mode 100644
-index 0000000000000000000000000000000000000000..4eab7d2e21ad3536b5ff3c137d74fa37d769a3cb
+index 0000000000000000000000000000000000000000..84fa22ac06f1c2533874e1677f4bbd899288c4d6
 --- /dev/null
 +++ b/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
-@@ -0,0 +1,423 @@
+@@ -0,0 +1,427 @@
 +package io.papermc.paper.threadedregions.scheduler;
 +
 +import ca.spottedleaf.concurrentutil.util.ConcurrentUtil;
@@ -6703,6 +6882,7 @@ index 0000000000000000000000000000000000000000..4eab7d2e21ad3536b5ff3c137d74fa37
 +import io.papermc.paper.threadedregions.RegionizedData;
 +import io.papermc.paper.threadedregions.RegionizedServer;
 +import io.papermc.paper.threadedregions.TickRegionScheduler;
++import io.papermc.paper.threadedregions.TickRegions;
 +import it.unimi.dsi.fastutil.longs.Long2ObjectMap;
 +import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 +import it.unimi.dsi.fastutil.longs.Long2ReferenceOpenHashMap;
@@ -6839,6 +7019,9 @@ index 0000000000000000000000000000000000000000..4eab7d2e21ad3536b5ff3c137d74fa37
 +    }
 +
 +    private static final class Scheduler {
++
++        private Scheduler(final TickRegions.TickRegionData regionData) {}
++
 +        private static final RegionizedData.RegioniserCallback<Scheduler> REGIONISER_CALLBACK = new RegionizedData.RegioniserCallback<>() {
 +            @Override
 +            public void merge(final Scheduler from, final Scheduler into, final long fromTickOffset) {
@@ -7821,7 +8004,7 @@ index 19ec939529eb638bdc4d7fd9260f161fae118314..c26e81b07f1ea6d0820147da35cc8555
  
      private static final class InnerUtil { // Attempt to hide these methods from ProtocolLib, so it doesn't accidently pick them up.
 diff --git a/net/minecraft/network/PacketProcessor.java b/net/minecraft/network/PacketProcessor.java
-index 3e4241976fdfe65bc0aae90a9097770745c0ddf1..406849772f764eb5f5f986ea5e3e0213f83b3255 100644
+index 3e4241976fdfe65bc0aae90a9097770745c0ddf1..f9300b9f8d15843dae8fd73ff066e4be99b60451 100644
 --- a/net/minecraft/network/PacketProcessor.java
 +++ b/net/minecraft/network/PacketProcessor.java
 @@ -19,6 +19,12 @@ public class PacketProcessor implements AutoCloseable {
@@ -7837,15 +8020,18 @@ index 3e4241976fdfe65bc0aae90a9097770745c0ddf1..406849772f764eb5f5f986ea5e3e0213
      // Paper start - improve tick loop
      public final boolean executeSinglePacket() {
          if (this.closed) {
-@@ -39,7 +45,7 @@ public class PacketProcessor implements AutoCloseable {
+@@ -39,9 +45,9 @@ public class PacketProcessor implements AutoCloseable {
          return Thread.currentThread() == this.runningThread;
      }
  
 -    public <T extends PacketListener> void scheduleIfPossible(T listener, Packet<T> packet) {
 +    public <T extends PacketListener> boolean scheduleIfPossible(T listener, Packet<T> packet) { // Folia - region threading - return whether to notify
          if (this.closed) {
-             throw new RejectedExecutionException("Server already shutting down");
+-            throw new RejectedExecutionException("Server already shutting down");
++            throw new RejectedExecutionException("Packet processor is shut down"); // Folia - region threading - change exception message
          } else {
+             // Paper start - improve tick loop
+             // wake up main thread inbetween ticks to process packets
 @@ -52,9 +58,10 @@ public class PacketProcessor implements AutoCloseable {
                  // only unpark if we are the first packet OR are at the head of the queue
                  // we unpark if we are at the head in case the main thread emptied the queue
@@ -7868,10 +8054,10 @@ index 3e4241976fdfe65bc0aae90a9097770745c0ddf1..406849772f764eb5f5f986ea5e3e0213
                  try {
                      this.packet.handle(this.listener);
 diff --git a/net/minecraft/network/protocol/PacketUtils.java b/net/minecraft/network/protocol/PacketUtils.java
-index 42d2f82b24ae48471bfc091667f8e84c5b0d62a8..760e7c579410432776ae8b1d6f70f0747da0460b 100644
+index 42d2f82b24ae48471bfc091667f8e84c5b0d62a8..ab80a66646a7ebe2862221ac342b06c14fcfc734 100644
 --- a/net/minecraft/network/protocol/PacketUtils.java
 +++ b/net/minecraft/network/protocol/PacketUtils.java
-@@ -19,8 +19,18 @@ public class PacketUtils {
+@@ -19,8 +19,16 @@ public class PacketUtils {
      }
  
      public static <T extends PacketListener> void ensureRunningOnSameThread(Packet<T> packet, T packetListener, PacketProcessor processor) throws RunningOnDifferentThreadException {
@@ -7880,9 +8066,7 @@ index 42d2f82b24ae48471bfc091667f8e84c5b0d62a8..760e7c579410432776ae8b1d6f70f074
 +        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) { // Folia - region threading
 +            // Folia start - region threading
 +            if (packetListener instanceof net.minecraft.server.network.ServerGamePacketListenerImpl gamePacketListener) {
-+                if (((org.bukkit.craftbukkit.entity.CraftPlayer)gamePacketListener.player.getBukkitEntity()).packetProcessor.scheduleIfPossible(packetListener, packet)) {
-+                    // TODO notify region intermediate tasks
-+                }
++                gamePacketListener.player.getBukkitEntity().schedulePacket(packetListener, packet);
 +            } else if (packetListener instanceof net.minecraft.server.network.ServerConfigurationPacketListenerImpl || packetListener instanceof net.minecraft.server.network.ServerLoginPacketListenerImpl) {
 +                io.papermc.paper.threadedregions.RegionizedServer.getInstance().schedulePacket(packetListener, packet);
 +            } else {
@@ -7893,7 +8077,7 @@ index 42d2f82b24ae48471bfc091667f8e84c5b0d62a8..760e7c579410432776ae8b1d6f70f074
          }
      }
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index e7d9306dfde918c1abb9e5320d7315810a66a4d7..ae5ef245999e456612edc6c566e8a8c302684fb7 100644
+index aa4d7c102c0952c35e6068dfa7f29e2fe52a43b2..aa2c7732749400ffaf6c0e3ff17b698959bfd5f4 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -196,7 +196,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -12707,7 +12891,7 @@ index 33e1cdb00d648c992af03a976899253141314b27..7f86b3538449616a7fa8423e86897364
              }
              // Spigot end
 diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
-index 1feb7e47b3aeb840676cf90ed3f62a42f4b03306..5302f32bf3540e194963c0153e90ea1664ea7b44 100644
+index 478a4a66fd8dc9e102c5f202d0bb00ca81308218..070d1c2652471f531c95821685c133feecce6e29 100644
 --- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
 @@ -293,10 +293,10 @@ public class ServerGamePacketListenerImpl
@@ -13077,15 +13261,6 @@ index 1feb7e47b3aeb840676cf90ed3f62a42f4b03306..5302f32bf3540e194963c0153e90ea16
                      this.player.setChatSession(chatSession);
                      this.server
                          .getPlayerList()
-@@ -3695,7 +3781,7 @@ public class ServerGamePacketListenerImpl
-         this.waitingForRespawn = true;
-     }
- 
--    private void restartClientLoadTimerAfterRespawn() {
-+    public void restartClientLoadTimerAfterRespawn() { // Folia - region threading
-         this.waitingForRespawn = false;
-         this.clientLoadedTimeoutTimer = 60;
-     }
 @@ -3725,19 +3811,7 @@ public class ServerGamePacketListenerImpl
  
      @Override
@@ -13108,7 +13283,7 @@ index 1feb7e47b3aeb840676cf90ed3f62a42f4b03306..5302f32bf3540e194963c0153e90ea16
  
      public final boolean isDisconnected() {
 diff --git a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
-index 31bc0a105152a7f24a4126542bea7dbebc3e037c..ce40fda2f6174602d53d46e860e87cf0ddbaeaed 100644
+index 51a29ab542136e67741be10bbc5c6377715a207c..605fbd9f16e6b969b3976dd1a905387ac0037c8a 100644
 --- a/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
 +++ b/net/minecraft/server/network/ServerLoginPacketListenerImpl.java
 @@ -94,7 +94,13 @@ public class ServerLoginPacketListenerImpl implements ServerLoginPacketListener,
@@ -13332,7 +13507,7 @@ index 6838b8d5c0d046a7db8a88534edc430d79d6c628..62b33d404a20c42eac557eb39188ae07
              date = defaultValue;
          }
 diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
-index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826dd75036a7 100644
+index 9f86d1fc4ea4c6987fa207644573565aea7edead..343d647ce6842b80017a7c8b97b66ec57cab68a4 100644
 --- a/net/minecraft/server/players/PlayerList.java
 +++ b/net/minecraft/server/players/PlayerList.java
 @@ -112,10 +112,10 @@ public abstract class PlayerList {
@@ -13475,7 +13650,15 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
              final net.minecraft.world.scores.Scoreboard scoreBoard = this.server.getLevel(Level.OVERWORLD).getScoreboard();
              final PlayerTeam team = scoreBoard.getPlayersTeam(this.collideRuleTeamName);
              if (player.getTeam() == team && team != null) {
-@@ -513,8 +570,7 @@ public abstract class PlayerList {
+@@ -495,6 +552,7 @@ public abstract class PlayerList {
+ 
+         serverLevel.removePlayerImmediately(player, Entity.RemovalReason.UNLOADED_WITH_PLAYER);
+         player.retireScheduler(); // Paper - Folia schedulers
++        player.getBukkitEntity().packetProcessor.close(); // Folia - region threading
+         player.getAdvancements().stopListening();
+         this.players.remove(player);
+         this.playersByName.remove(player.getScoreboardName().toLowerCase(java.util.Locale.ROOT)); // Spigot
+@@ -513,8 +571,7 @@ public abstract class PlayerList {
          // CraftBukkit start
          // this.broadcastAll(new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID())));
          ClientboundPlayerInfoRemovePacket packet = new ClientboundPlayerInfoRemovePacket(List.of(player.getUUID()));
@@ -13485,7 +13668,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
  
              if (otherPlayer.getBukkitEntity().canSee(player.getBukkitEntity())) {
                  otherPlayer.connection.send(packet);
-@@ -537,7 +593,7 @@ public abstract class PlayerList {
+@@ -537,7 +594,7 @@ public abstract class PlayerList {
          }
      }
      // Paper end - PlayerLoginEvent
@@ -13494,7 +13677,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
          LoginResult whitelistEventResult; // Paper
          // Paper start - Fix MC-158900
          UserBanListEntry userBanListEntry;
-@@ -546,7 +602,7 @@ public abstract class PlayerList {
+@@ -546,7 +603,7 @@ public abstract class PlayerList {
              MutableComponent mutableComponent = Component.translatable("multiplayer.disconnect.banned.reason", userBanListEntry.getReasonMessage());
              if (userBanListEntry.getExpires() != null) {
                  mutableComponent.append(
@@ -13503,7 +13686,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
                  );
              }
  
-@@ -560,13 +616,13 @@ public abstract class PlayerList {
+@@ -560,13 +617,13 @@ public abstract class PlayerList {
              MutableComponent mutableComponent = Component.translatable("multiplayer.disconnect.banned_ip.reason", ipBanListEntry.getReasonMessage());
              if (ipBanListEntry.getExpires() != null) {
                  mutableComponent.append(
@@ -13519,7 +13702,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
          }
      }
  
-@@ -585,15 +641,18 @@ public abstract class PlayerList {
+@@ -585,15 +642,18 @@ public abstract class PlayerList {
              set.add(serverPlayer1);
          }
  
@@ -13541,7 +13724,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
          ServerPlayer.RespawnResult result = player.findRespawnPositionAndUseSpawnBlock0(!keepInventory, TeleportTransition.DO_NOTHING, respawnReason);
          if (result == null) { // disconnected player during the respawn event
              return player;
-@@ -736,10 +795,10 @@ public abstract class PlayerList {
+@@ -736,10 +796,10 @@ public abstract class PlayerList {
      public void tick() {
          if (++this.sendAllPlayerInfoIn > 600) {
              // CraftBukkit start
@@ -13555,7 +13738,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
              }
              // CraftBukkit end
              this.sendAllPlayerInfoIn = 0;
-@@ -757,8 +816,8 @@ public abstract class PlayerList {
+@@ -757,8 +817,8 @@ public abstract class PlayerList {
      }
  
      public void broadcastAll(Packet packet, Level world) {
@@ -13566,7 +13749,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
          }
  
      }
-@@ -795,8 +854,7 @@ public abstract class PlayerList {
+@@ -795,8 +855,7 @@ public abstract class PlayerList {
          if (team == null) {
              this.broadcastSystemMessage(message, false);
          } else {
@@ -13576,7 +13759,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
                  if (serverPlayer.getTeam() != team) {
                      serverPlayer.sendSystemMessage(message);
                  }
-@@ -805,10 +863,11 @@ public abstract class PlayerList {
+@@ -805,10 +864,11 @@ public abstract class PlayerList {
      }
  
      public String[] getPlayerNamesArray() {
@@ -13590,7 +13773,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
          }
  
          return strings;
-@@ -835,7 +894,9 @@ public abstract class PlayerList {
+@@ -835,7 +895,9 @@ public abstract class PlayerList {
              );
          ServerPlayer player = this.getPlayer(nameAndId.id());
          if (player != null) {
@@ -13601,7 +13784,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
          }
      }
  
-@@ -843,7 +904,11 @@ public abstract class PlayerList {
+@@ -843,7 +905,11 @@ public abstract class PlayerList {
          if (this.ops.remove(nameAndId)) {
              ServerPlayer player = this.getPlayer(nameAndId.id());
              if (player != null) {
@@ -13614,7 +13797,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
              }
          }
      }
-@@ -873,8 +938,8 @@ public abstract class PlayerList {
+@@ -873,8 +939,8 @@ public abstract class PlayerList {
      }
  
      // Paper start - whitelist verify event / login event
@@ -13625,7 +13808,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
          final io.papermc.paper.event.player.PlayerServerFullCheckEvent fullCheckEvent = new io.papermc.paper.event.player.PlayerServerFullCheckEvent(
              new com.destroystokyo.paper.profile.CraftPlayerProfile(nameAndId),
              io.papermc.paper.adventure.PaperAdventure.asAdventure(currentResult.message),
-@@ -923,8 +988,7 @@ public abstract class PlayerList {
+@@ -923,8 +989,7 @@ public abstract class PlayerList {
      }
  
      public void broadcast(@Nullable Player except, double x, double y, double z, double radius, ResourceKey<Level> dimension, Packet<?> packet) {
@@ -13635,7 +13818,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
              // CraftBukkit start - Test if player receiving packet can see the source of the packet
              if (except != null && !serverPlayer.getBukkitEntity().canSee(except.getBukkitEntity())) {
                 continue;
-@@ -949,10 +1013,15 @@ public abstract class PlayerList {
+@@ -949,10 +1014,15 @@ public abstract class PlayerList {
      public void saveAll(final int interval) {
          io.papermc.paper.util.MCUtil.ensureMain("Save Players" , () -> { // Paper - Ensure main
          int numSaved = 0;
@@ -13655,7 +13838,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
                  this.save(player);
                  if (interval != -1 && ++numSaved >= io.papermc.paper.configuration.GlobalConfiguration.get().playerAutoSave.maxPerTick()) {
                      break;
-@@ -1074,6 +1143,20 @@ public abstract class PlayerList {
+@@ -1074,6 +1144,20 @@ public abstract class PlayerList {
      }
  
      public void removeAll(boolean isRestarting) {
@@ -13676,7 +13859,7 @@ index 9f86d1fc4ea4c6987fa207644573565aea7edead..46f8bbac3ef9bec3a0f069b10313826d
          // Paper end
          // CraftBukkit start - disconnect safely
          for (ServerPlayer player : this.players) {
-@@ -1083,7 +1166,7 @@ public abstract class PlayerList {
+@@ -1083,7 +1167,7 @@ public abstract class PlayerList {
          // CraftBukkit end
  
          // Paper start - Configurable player collision; Remove collideRule team if it exists
@@ -13927,7 +14110,7 @@ index 6471ff779dd1672db769538bad1d00c8c5724be3..956782df0a3a5e221422c072d7c1c67e
              return blockToFallLocation(blockState);
          } else {
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126bff517c79 100644
+index cd434d5a6e37a525611fd0b44b9a859435c4d157..7fc26d8d17970d58f3bb0ca4849005ef7a7abb28 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -160,7 +160,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
@@ -14032,7 +14215,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
                      atomicInteger.set(index);
                      BlockState blockState = this.level().getBlockState(pos);
                      if (blockState.isAir()) {
-@@ -3251,6 +3272,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3253,6 +3274,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              }
  
              if (force || this.canRide(entity) && entity.canAddPassenger(this)) {
@@ -14040,7 +14223,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
                  // CraftBukkit start
                  if (entity.getBukkitEntity() instanceof org.bukkit.entity.Vehicle && this.getBukkitEntity() instanceof org.bukkit.entity.LivingEntity) {
                      org.bukkit.event.vehicle.VehicleEnterEvent event = new org.bukkit.event.vehicle.VehicleEnterEvent((org.bukkit.entity.Vehicle) entity.getBukkitEntity(), this.getBukkitEntity());
-@@ -3272,6 +3294,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3274,6 +3296,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
                      return false;
                  }
                  // CraftBukkit end
@@ -14048,7 +14231,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
                  if (this.isPassenger()) {
                      this.stopRiding();
                  }
-@@ -3280,7 +3303,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3282,7 +3305,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
                  this.vehicle = entity;
                  this.vehicle.addPassenger(this);
                  if (triggerEvents) {
@@ -14057,7 +14240,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
                      entity.getIndirectPassengersStream()
                          .filter(entity2 -> entity2 instanceof ServerPlayer)
                          .forEach(entity2 -> CriteriaTriggers.START_RIDING_TRIGGER.trigger((ServerPlayer)entity2));
-@@ -3316,7 +3339,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3318,7 +3341,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              if (!entity.removePassenger(this, suppressCancellation)) this.vehicle = entity; // CraftBukkit // Paper - Force entity dismount during teleportation
              Entity.RemovalReason removalReason = this.getRemovalReason();
              if (removalReason == null || removalReason.shouldDestroy()) {
@@ -14066,7 +14249,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
              }
          }
      }
-@@ -3360,6 +3383,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3362,6 +3385,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              throw new IllegalStateException("Use x.stopRiding(y), not y.removePassenger(x)");
          } else {
              // CraftBukkit start
@@ -14074,7 +14257,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
              org.bukkit.craftbukkit.entity.CraftEntity craft = (org.bukkit.craftbukkit.entity.CraftEntity) passenger.getBukkitEntity().getVehicle();
              Entity orig = craft == null ? null : craft.getHandle();
              if (this.getBukkitEntity() instanceof org.bukkit.entity.Vehicle && passenger.getBukkitEntity() instanceof org.bukkit.entity.LivingEntity) {
-@@ -3387,6 +3411,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3389,6 +3413,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
                  return false;
              }
              // CraftBukkit end
@@ -14082,7 +14265,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
              if (this.passengers.size() == 1 && this.passengers.get(0) == passenger) {
                  this.passengers = ImmutableList.of();
              } else {
-@@ -3484,7 +3509,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3486,7 +3511,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          }
      }
  
@@ -14091,15 +14274,14 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
          if (this.level() instanceof ServerLevel serverLevel) {
              this.processPortalCooldown();
              if (this.portalProcess != null) {
-@@ -3492,23 +3517,20 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3494,22 +3519,20 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
                      ProfilerFiller profilerFiller = Profiler.get();
                      profilerFiller.push("portal");
                      this.setPortalCooldown();
 -                    TeleportTransition portalDestination = this.portalProcess.getPortalDestination(serverLevel, this);
 -                    if (portalDestination != null) {
 -                        ServerLevel level = portalDestination.newLevel();
--                        if (this instanceof ServerPlayer // CraftBukkit - always call event for players
--                            || (level != null && (level.dimension() == serverLevel.dimension() || this.canTeleport(serverLevel, level))) // CraftBukkit
+-                        if (serverLevel.isAllowedToEnterPortal(level) && (level.dimension() == serverLevel.dimension() || this.canTeleport(serverLevel, level))
 -                            )
 -                         {
 -                            this.teleport(portalDestination);
@@ -14123,7 +14305,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
      }
  
      public int getDimensionChangingDelay() {
-@@ -3647,6 +3669,11 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3648,6 +3671,11 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
      }
  
      public @Nullable PlayerTeam getTeam() {
@@ -14135,7 +14317,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
          if (!this.level().paperConfig().scoreboards.allowNonPlayerEntitiesOnScoreboards && !(this instanceof Player)) { return null; } // Paper - Perf: Disable Scoreboards for non players by default
          return this.level().getScoreboard().getPlayersTeam(this.getScoreboardName());
      }
-@@ -3991,7 +4018,794 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3992,7 +4020,794 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          this.portalProcess = entity.portalProcess;
      }
  
@@ -14930,7 +15112,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
          // Paper start - Fix item duplication and teleport issues
          if ((!this.isAlive() || !this.valid) && (teleportTransition.newLevel() != this.level)) {
              LOGGER.warn("Illegal Entity Teleport {} to {}:{}", this, teleportTransition.newLevel(), teleportTransition.position(), new Throwable());
-@@ -4196,6 +5010,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4197,6 +5012,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          }
      }
  
@@ -14943,7 +15125,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
      protected void removeAfterChangingDimensions() {
          this.setRemoved(Entity.RemovalReason.CHANGED_DIMENSION, null); // CraftBukkit - add Bukkit remove cause
          if (this instanceof Leashable leashable && leashable.isLeashed()) { // Paper - only call if it is leashed
-@@ -4496,6 +5316,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4497,6 +5318,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
      }
  
      public void startSeenByPlayer(ServerPlayer player) {
@@ -14956,7 +15138,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
      }
  
      public void stopSeenByPlayer(ServerPlayer player) {
-@@ -4505,6 +5331,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4506,6 +5333,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              new io.papermc.paper.event.player.PlayerUntrackEntityEvent(player.getBukkitEntity(), this.getBukkitEntity()).callEvent();
          }
          // Paper end - entity tracking events
@@ -14969,7 +15151,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
      }
  
      public float rotate(Rotation transformRotation) {
-@@ -5031,7 +5863,8 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5032,7 +5865,8 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              return;
          }
          // Paper end - Block invalid positions and bounding box
@@ -14979,7 +15161,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
              synchronized (this.posLock) { // Paper - detailed watchdog information
              this.position = new Vec3(x, y, z);
              } // Paper - detailed watchdog information
-@@ -5064,7 +5897,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5065,7 +5899,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          }
          // Paper start - Block invalid positions and bounding box; don't allow desync of pos and AABB
          // hanging has its own special logic
@@ -14988,7 +15170,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
              this.setBoundingBox(this.makeBoundingBox());
          }
          // Paper end - Block invalid positions and bounding box
-@@ -5170,6 +6003,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5171,6 +6005,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          return this.removalReason != null;
      }
  
@@ -15001,7 +15183,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
      public Entity.@Nullable RemovalReason getRemovalReason() {
          return this.removalReason;
      }
-@@ -5184,6 +6023,9 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5185,6 +6025,9 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          // Paper end - rewrite chunk system
          org.bukkit.craftbukkit.event.CraftEventFactory.callEntityRemoveEvent(this, cause); // CraftBukkit
          final boolean alreadyRemoved = this.removalReason != null; // Paper - Folia schedulers
@@ -15011,7 +15193,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
          if (this.removalReason == null) {
              this.removalReason = removalReason;
          }
-@@ -5207,6 +6049,10 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5208,6 +6051,10 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          this.removalReason = null;
      }
  
@@ -15022,7 +15204,7 @@ index ad4322950726f86e250927f097a4214ed25ddce0..02e5eff81568aff2fa9dc21e1225126b
      // Paper start - Folia schedulers
      /**
       * Invoked only when the entity is truly removed from the server, never to be added to any world.
-@@ -5218,7 +6064,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5219,7 +6066,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
      // Paper end - Folia schedulers
      // Paper start - optimise Folia entity scheduler
      public final void registerScheduler() {
@@ -17011,7 +17193,7 @@ index bcbe39eed2d254861689c95f7040f27b6ff2d438..d49c42c60c8e2174e3654cc09acbd47e
                  return player;
              }
 diff --git a/net/minecraft/world/level/Level.java b/net/minecraft/world/level/Level.java
-index 0df3a12f64f9c48561d64059289727b18239d6ce..3cd535e108e797d4a0b3e776ad0c70d949335061 100644
+index 0df3a12f64f9c48561d64059289727b18239d6ce..faa9fd5d905896e366c800263d3115ae4c6a919c 100644
 --- a/net/minecraft/world/level/Level.java
 +++ b/net/minecraft/world/level/Level.java
 @@ -112,10 +112,10 @@ public abstract class Level implements LevelAccessor, AutoCloseable, ca.spottedl
@@ -17091,7 +17273,7 @@ index 0df3a12f64f9c48561d64059289727b18239d6ce..3cd535e108e797d4a0b3e776ad0c70d9
 +    // Folia start - region ticking
 +    public final io.papermc.paper.threadedregions.RegionizedData<io.papermc.paper.threadedregions.RegionizedWorldData> worldRegionData
 +        = new io.papermc.paper.threadedregions.RegionizedData<>(
-+        (ServerLevel)this, () -> new io.papermc.paper.threadedregions.RegionizedWorldData((ServerLevel)Level.this),
++        (ServerLevel)this, (regionData) -> new io.papermc.paper.threadedregions.RegionizedWorldData((ServerLevel)Level.this, regionData),
 +        io.papermc.paper.threadedregions.RegionizedWorldData.REGION_CALLBACK
 +    );
 +    public volatile io.papermc.paper.threadedregions.RegionizedServer.WorldLevelData tickData;

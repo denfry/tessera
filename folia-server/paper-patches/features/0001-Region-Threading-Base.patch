@@ -412,10 +412,10 @@ index bd68139ae635f2ad7ec8e7a21e0056a139c4c62e..48a43341b17247355a531164019d5cc9
      }
  
 diff --git a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
-index c52d2530f6bfd601e8af8fd6713e6870cf5611d3..a4c40d87f9aecca8e59b821d6fc0eb6f3be6b49e 100644
+index c52d2530f6bfd601e8af8fd6713e6870cf5611d3..4285e187999451b61e1651bf2137598d53aa41fd 100644
 --- a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
 +++ b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
-@@ -394,4 +394,17 @@ public class GlobalConfiguration extends ConfigurationPart {
+@@ -394,4 +394,18 @@ public class GlobalConfiguration extends ConfigurationPart {
              }
          }
      }
@@ -425,6 +425,7 @@ index c52d2530f6bfd601e8af8fd6713e6870cf5611d3..a4c40d87f9aecca8e59b821d6fc0eb6f
 +
 +        public int threads = -1;
 +        public int gridExponent = 4;
++        public io.papermc.paper.threadedregions.TickRegionScheduler.SchedulerType scheduler = io.papermc.paper.threadedregions.TickRegionScheduler.SchedulerType.EDF;
 +
 +        @PostProcess
 +        public void postProcess() {
@@ -782,7 +783,7 @@ index 46f6750b1eae80ea3e8c4762754e1cd4fc7aa99f..fdcf3f70637ee9ae20b40a831e8108a3
                  MinecraftServer.LOGGER.warn("Asynchronous " + reason + "!", new IllegalStateException());
              }
 diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
-index b2961752b50e98d95adf3af4f658e2fdb2127d43..51b54104eb70f64a548f37eeab1a444678fafc8b 100644
+index b2961752b50e98d95adf3af4f658e2fdb2127d43..1e117e7278dfd30ee27d0fcf46c8dc8f5d8075e4 100644
 --- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
 @@ -307,7 +307,7 @@ public final class CraftServer implements Server {
@@ -871,7 +872,7 @@ index b2961752b50e98d95adf3af4f658e2fdb2127d43..51b54104eb70f64a548f37eeab1a4446
 -        final TickData.MSPTData reportData = this.getServer().getMSPTData5s();
 -        return reportData == null ? 0.0 : reportData.avg();
 +        // Folia start - region threading
-+        ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask();
++        ca.spottedleaf.concurrentutil.scheduler.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask();
 +        if (task == null) {
 +            // might be on the shutdown thread, try retrieving the current region
 +            if (io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion() != null) {
@@ -896,7 +897,7 @@ index b2961752b50e98d95adf3af4f658e2fdb2127d43..51b54104eb70f64a548f37eeab1a4446
      public double[] getTPS() {
 -        return this.getServer().getTPS();
 +        // Folia start - region threading
-+        ca.spottedleaf.concurrentutil.scheduler.SchedulerThreadPool.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask();
++        ca.spottedleaf.concurrentutil.scheduler.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask();
 +        if (task == null) {
 +            // might be on the shutdown thread, try retrieving the current region
 +            if (io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion() != null) {
@@ -2696,10 +2697,10 @@ index 32e426513f3e710abeda3363a4e2a08fe902c703..2655d6c0c58c27bd532d13fab723863c
      }
  
 diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
-index dfc66145bcd46cefb0210e4690d8cfb8054852e0..8456ca98d67cdbc66acfd522eab31ae0397659fb 100644
+index b0987314d2635d685129af70b4b02cba3075e594..713b1bcf6ff77febceddaffc2b96c10f3aeda0c6 100644
 --- a/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
 +++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftLivingEntity.java
-@@ -106,6 +106,7 @@ public class CraftLivingEntity extends CraftEntity implements LivingEntity {
+@@ -114,6 +114,7 @@ public class CraftLivingEntity extends CraftEntity implements LivingEntity {
  
      @Override
      public net.minecraft.world.entity.LivingEntity getHandle() {
@@ -3064,18 +3065,45 @@ index 1c416a449e2dd831265a89c577068757d645a0b8..d719c6dfd10f661d71c23096ceabc9bd
      }
  
 diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
-index 2fdc19114f707d255ce4d6196a2e18e096784862..76d9bf5090e7a452c328fb7c8cf4dcde0fe713f9 100644
+index e3c9327de894fdfb252781772817f4c8bc079cce..0d26a26d15de61031c6277e1671a3992dbf52f2d 100644
 --- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
 +++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
-@@ -247,6 +247,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -247,6 +247,34 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
      private BorderChangeListener clientWorldBorderListener = this.createWorldBorderListener();
      private long lastSaveTime; // Paper - getLastPlayed replacement API
      private @Nullable CraftScoreboard scoreboardOverride;
 +    public final net.minecraft.network.PacketProcessor packetProcessor = new net.minecraft.network.PacketProcessor(null); // Folia
++
++    // Folia start - region threading
++    // used only to notify tasks for packets
++    private volatile io.papermc.paper.threadedregions.RegionizedWorldData lastRegion;
++
++    public void stopAcceptingPackets() {
++        this.packetProcessor.close();
++    }
++
++    public void updateRegion(final io.papermc.paper.threadedregions.RegionizedWorldData region) {
++        this.lastRegion = region;
++        if (region != null && this.packetProcessor.hasPackets()) {
++            region.regionData.setHasPackets();
++        }
++    }
++
++    public <T extends net.minecraft.network.PacketListener> void schedulePacket(T listener, net.minecraft.network.protocol.Packet<T> packet) {
++        if (!this.packetProcessor.scheduleIfPossible(listener, packet)) {
++            return;
++        }
++
++        final io.papermc.paper.threadedregions.RegionizedWorldData region = this.lastRegion;
++        if (region != null) {
++            region.regionData.setHasPackets();
++        }
++    }
++    // Folia end - region threading
  
      public CraftPlayer(CraftServer server, ServerPlayer entity) {
          super(server, entity);
-@@ -256,7 +257,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -256,7 +284,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
  
      @Override
      public ServerPlayer getHandle() {
@@ -3084,7 +3112,7 @@ index 2fdc19114f707d255ce4d6196a2e18e096784862..76d9bf5090e7a452c328fb7c8cf4dcde
      }
  
      @Override
-@@ -655,13 +656,13 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -655,13 +683,13 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
  
      @Override
      public void kickPlayer(String message) {
@@ -3100,7 +3128,7 @@ index 2fdc19114f707d255ce4d6196a2e18e096784862..76d9bf5090e7a452c328fb7c8cf4dcde
          final ServerGamePacketListenerImpl connection = this.getHandle().connection;
          if (connection != null) {
              connection.disconnect(message == null ? net.kyori.adventure.text.Component.empty() : message, cause);
-@@ -1308,6 +1309,11 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1308,6 +1336,11 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
  
      @Override
      protected boolean teleport0(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, io.papermc.paper.entity.TeleportFlag... flags) {
@@ -3112,7 +3140,7 @@ index 2fdc19114f707d255ce4d6196a2e18e096784862..76d9bf5090e7a452c328fb7c8cf4dcde
          if (this.getHandle().connection == null) {
              return false;
          }
-@@ -1884,7 +1890,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1884,7 +1917,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
      private void unregisterEntity(Entity other) {
          // Paper end
          ChunkMap tracker = ((ServerLevel) this.getHandle().level()).getChunkSource().chunkMap;
@@ -3121,7 +3149,7 @@ index 2fdc19114f707d255ce4d6196a2e18e096784862..76d9bf5090e7a452c328fb7c8cf4dcde
          if (entry != null) {
              entry.removePlayer(this.getHandle());
          }
-@@ -1973,7 +1979,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -1973,7 +2006,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
              if (original != null) otherPlayer.setUUID(original); // Paper - uuid override
          }
  
@@ -3130,11 +3158,12 @@ index 2fdc19114f707d255ce4d6196a2e18e096784862..76d9bf5090e7a452c328fb7c8cf4dcde
          if (entry != null && !entry.seenBy.contains(this.getHandle().connection)) {
              entry.updatePlayer(this.getHandle());
          }
-@@ -3035,7 +3041,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+@@ -3035,8 +3068,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
          @Override
          public void respawn() {
              if (CraftPlayer.this.getHealth() <= 0 && CraftPlayer.this.isOnline()) {
 -                CraftPlayer.this.server.getServer().getPlayerList().respawn(CraftPlayer.this.getHandle(), false, Entity.RemovalReason.KILLED, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason.PLUGIN);
+-                CraftPlayer.this.getHandle().connection.restartClientLoadTimerAfterRespawn();
 +                CraftPlayer.this.getHandle().respawn(null, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason.PLUGIN); // Folia - region threading
              }
          }
