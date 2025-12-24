@@ -8077,7 +8077,7 @@ index 42d2f82b24ae48471bfc091667f8e84c5b0d62a8..ab80a66646a7ebe2862221ac342b06c1
          }
      }
 diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
-index aa4d7c102c0952c35e6068dfa7f29e2fe52a43b2..aa2c7732749400ffaf6c0e3ff17b698959bfd5f4 100644
+index aa4d7c102c0952c35e6068dfa7f29e2fe52a43b2..b68e0220b3a2850f6a10578c0784decdc0cdef18 100644
 --- a/net/minecraft/server/MinecraftServer.java
 +++ b/net/minecraft/server/MinecraftServer.java
 @@ -196,7 +196,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
@@ -8257,16 +8257,21 @@ index aa4d7c102c0952c35e6068dfa7f29e2fe52a43b2..aa2c7732749400ffaf6c0e3ff17b6989
                  level.registryAccess()
                      .lookup(Registries.CONFIGURED_FEATURE)
                      .flatMap(registry -> registry.get(MiscOverworldFeatures.BONUS_CHEST))
-@@ -895,7 +928,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
-         // CraftBukkit end
+@@ -896,19 +929,19 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
          ChunkLoadCounter chunkLoadCounter = new ChunkLoadCounter();
  
--        if (true) { // CraftBukkit
-+        if (false) { // CraftBukkit // Folia - region threading
-             chunkLoadCounter.track(serverLevel, () -> {
+         if (true) { // CraftBukkit
+-            chunkLoadCounter.track(serverLevel, () -> {
++            //chunkLoadCounter.track(serverLevel, () -> { // Folia - region threading
                  TicketStorage ticketStorage = serverLevel.getDataStorage().get(TicketStorage.TYPE);
                  if (ticketStorage != null) {
-@@ -908,7 +941,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                     ticketStorage.activateAllDeactivatedTickets();
+                 }
+-            });
++            //}); // Folia - region threading
+         }
+ 
+         serverLevel.levelLoadListener.start(LevelLoadListener.Stage.LOAD_INITIAL_CHUNKS, chunkLoadCounter.totalChunks()); // Paper - per world load listener
  
          do {
              serverLevel.levelLoadListener.update(LevelLoadListener.Stage.LOAD_INITIAL_CHUNKS, chunkLoadCounter.readyChunks(), chunkLoadCounter.totalChunks()); // Paper - per world load listener
@@ -13507,7 +13512,7 @@ index 6838b8d5c0d046a7db8a88534edc430d79d6c628..62b33d404a20c42eac557eb39188ae07
              date = defaultValue;
          }
 diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
-index 9f86d1fc4ea4c6987fa207644573565aea7edead..343d647ce6842b80017a7c8b97b66ec57cab68a4 100644
+index 989ac565c47a70c7947cb7315d0f5c2cfecd0363..e0654190600925b912703e026cc716864f0741fd 100644
 --- a/net/minecraft/server/players/PlayerList.java
 +++ b/net/minecraft/server/players/PlayerList.java
 @@ -112,10 +112,10 @@ public abstract class PlayerList {
