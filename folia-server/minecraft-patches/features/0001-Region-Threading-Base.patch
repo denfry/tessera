@@ -7482,7 +7482,7 @@ index 566304106fd4f1c677a56e7c66282d1570e7b974..f046aca874eb3376696baaad3719a698
      }
  
 diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
-index 668eb52d71d77f75c24d4840be9a6c49d96dfc34..d4a5ba350f3cf0d6cd2aab786e1ef8dbb616ee2b 100644
+index 668eb52d71d77f75c24d4840be9a6c49d96dfc34..c859197d643fd96ea2a5ef51837abc457e27f002 100644
 --- a/net/minecraft/commands/Commands.java
 +++ b/net/minecraft/commands/Commands.java
 @@ -196,15 +196,15 @@ public class Commands {
@@ -7535,7 +7535,7 @@ index 668eb52d71d77f75c24d4840be9a6c49d96dfc34..d4a5ba350f3cf0d6cd2aab786e1ef8db
          RecipeCommand.register(this.dispatcher);
          FetchProfileCommand.register(this.dispatcher);
 -        ReturnCommand.register(this.dispatcher);
-+        ReturnCommand.register(this.dispatcher); // Folia - region threading - TODO later
++        //ReturnCommand.register(this.dispatcher); // Folia - region threading
          RideCommand.register(this.dispatcher);
          RotateCommand.register(this.dispatcher);
          SayCommand.register(this.dispatcher);
