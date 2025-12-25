@@ -7482,7 +7482,7 @@ index 566304106fd4f1c677a56e7c66282d1570e7b974..f046aca874eb3376696baaad3719a698
      }
  
 diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
-index 668eb52d71d77f75c24d4840be9a6c49d96dfc34..5c45fe4d6bb9c97868632cf2709efaa04e1a1348 100644
+index 668eb52d71d77f75c24d4840be9a6c49d96dfc34..d4a5ba350f3cf0d6cd2aab786e1ef8dbb616ee2b 100644
 --- a/net/minecraft/commands/Commands.java
 +++ b/net/minecraft/commands/Commands.java
 @@ -196,15 +196,15 @@ public class Commands {
@@ -7535,9 +7535,8 @@ index 668eb52d71d77f75c24d4840be9a6c49d96dfc34..5c45fe4d6bb9c97868632cf2709efaa0
          RecipeCommand.register(this.dispatcher);
          FetchProfileCommand.register(this.dispatcher);
 -        ReturnCommand.register(this.dispatcher);
--        RideCommand.register(this.dispatcher);
 +        ReturnCommand.register(this.dispatcher); // Folia - region threading - TODO later
-+        RideCommand.register(this.dispatcher); // Folia - region threading - TODO later
+         RideCommand.register(this.dispatcher);
          RotateCommand.register(this.dispatcher);
          SayCommand.register(this.dispatcher);
 -        ScheduleCommand.register(this.dispatcher);
@@ -9807,6 +9806,74 @@ index ce7956b706ecfa036e03c1f6207efac4b84f4afd..2df9ef239c723a7d6a9574ebdd919e0b
          }
  
          if (i == 0) {
+diff --git a/net/minecraft/server/commands/RideCommand.java b/net/minecraft/server/commands/RideCommand.java
+index 552b15ac8a35ced2cb48e48ab972d995f5286518..2ecd61d7b90c2f8f5d81ab6ba6264b535afea455 100644
+--- a/net/minecraft/server/commands/RideCommand.java
++++ b/net/minecraft/server/commands/RideCommand.java
+@@ -56,7 +56,22 @@ public class RideCommand {
+         );
+     }
+ 
+-    private static int mount(CommandSourceStack source, Entity target, Entity vehicle) throws CommandSyntaxException {
++    // Folia start - region threading
++    private static void sendMessage(CommandSourceStack src, CommandSyntaxException ex) {
++        src.sendFailure((Component)ex.getRawMessage());
++    }
++    // Folia end - region threading
++
++    private static int mount(CommandSourceStack source, Entity targetOld, Entity vehicleOld) throws CommandSyntaxException {  // Folia - region threading
++        // Folia start - region threading
++        targetOld.getBukkitEntity().taskScheduler.schedule((Entity target) -> {
++            try {
++                Entity vehicle = vehicleOld.getBukkitEntity().getHandleRaw();
++                if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(vehicle)) {
++                    source.sendFailure(Component.literal("Cannot mount entities cross-region"));
++                    return;
++                }
++                // Folia end - region threading
+         Entity vehicle1 = target.getVehicle();
+         if (vehicle1 != null) {
+             throw ERROR_ALREADY_RIDING.create(target.getDisplayName(), vehicle1.getDisplayName());
+@@ -70,18 +85,36 @@ public class RideCommand {
+             throw ERROR_MOUNT_FAILED.create(target.getDisplayName(), vehicle.getDisplayName());
+         } else {
+             source.sendSuccess(() -> Component.translatable("commands.ride.mount.success", target.getDisplayName(), vehicle.getDisplayName()), true);
+-            return 1;
++            return; // Folia - region threading
+         }
++        // Folia start - region threading
++            } catch (CommandSyntaxException ex) {
++                sendMessage(source, ex);
++            }
++        }, null, 1L);
++        return 0;
++        // Folia end - region threading
+     }
+ 
+-    private static int dismount(CommandSourceStack source, Entity target) throws CommandSyntaxException {
++    private static int dismount(CommandSourceStack source, Entity targetOld) throws CommandSyntaxException { // Folia - region threading
++        // Folia start - region threading
++        targetOld.getBukkitEntity().taskScheduler.schedule((Entity target) -> {
++            try {
++                // Folia end - region threading
+         Entity vehicle = target.getVehicle();
+         if (vehicle == null) {
+             throw ERROR_NOT_RIDING.create(target.getDisplayName());
+         } else {
+             target.stopRiding();
+             source.sendSuccess(() -> Component.translatable("commands.ride.dismount.success", target.getDisplayName(), vehicle.getDisplayName()), true);
+-            return 1;
++            return; // Folia - region threading
+         }
++        // Folia start - region threading
++            } catch (CommandSyntaxException ex) {
++                sendMessage(source, ex);
++            }
++        }, null, 1L);
++        return 0;
++        // Folia end - region threading
+     }
+ }
 diff --git a/net/minecraft/server/commands/RotateCommand.java b/net/minecraft/server/commands/RotateCommand.java
 index 3f3d55a7ba65c9e83ba140d585f49317f6b56cb1..b090cf8d4b7d1e60fe37866740b015c25bff1e29 100644
 --- a/net/minecraft/server/commands/RotateCommand.java
