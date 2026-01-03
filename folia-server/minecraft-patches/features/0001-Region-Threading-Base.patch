@@ -14212,7 +14212,7 @@ index 6471ff779dd1672db769538bad1d00c8c5724be3..956782df0a3a5e221422c072d7c1c67e
              return blockToFallLocation(blockState);
          } else {
 diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
-index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3431e0171 100644
+index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..3df00628e64f55f86095f4b7d35a116515e49628 100644
 --- a/net/minecraft/world/entity/Entity.java
 +++ b/net/minecraft/world/entity/Entity.java
 @@ -160,7 +160,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
@@ -14419,7 +14419,7 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
          if (!this.level().paperConfig().scoreboards.allowNonPlayerEntitiesOnScoreboards && !(this instanceof Player)) { return null; } // Paper - Perf: Disable Scoreboards for non players by default
          return this.level().getScoreboard().getPlayersTeam(this.getScoreboardName());
      }
-@@ -3992,7 +4020,794 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -3992,7 +4020,787 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          this.portalProcess = entity.portalProcess;
      }
  
@@ -14803,47 +14803,40 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
 +        // TODO any events that can modify go HERE
 +
 +        // check for same region
-+        if (destination == this.level()) {
-+            Vec3 currPos = this.position();
-+            if (
-+                destination.regioniser.getRegionAtUnsynchronised(
-+                    ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(currPos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(currPos)
-+                ) == destination.regioniser.getRegionAtUnsynchronised(
-+                    ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(pos)
-+                )
-+            ) {
-+                boolean hasPassengers = !this.passengers.isEmpty();
-+                EntityTreeNode passengerTree = this.detachPassengers();
++        if (destination == this.level()
++                && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(destination, ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getChunkZ(pos), 8)
++                && (((teleportFlags & TELEPORT_FLAG_LOAD_CHUNK) == 0L) || destination.areChunksLoadedForMove(this.getBoundingBoxAt(pos.x, pos.y, pos.z)))) {
++            boolean hasPassengers = !this.passengers.isEmpty();
++            EntityTreeNode passengerTree = this.detachPassengers();
 +
-+                if (hasPassengers) {
-+                    // Note: The client does not accept position updates for controlled entities. So, we must
-+                    // perform a lot of tracker updates here to make it all work out.
++            if (hasPassengers) {
++                // Note: The client does not accept position updates for controlled entities. So, we must
++                // perform a lot of tracker updates here to make it all work out.
 +
-+                    // first, clear the tracker
-+                    passengerTree.clearTracker();
-+                }
-+
-+                for (EntityTreeNode entity : passengerTree.getFullTree()) {
-+                    entity.root.teleportSyncSameRegion(pos, yaw, pitch, velocity);
-+                }
-+
-+                if (hasPassengers) {
-+                    passengerTree.restore();
-+                    // re-add to the tracker once the tree is restored
-+                    passengerTree.addTracker();
-+
-+                    // adjust entities to final position
-+                    passengerTree.adjustRiders(true);
-+
-+                    // the tracker clear/add logic is only used in the same region, as the other logic
-+                    // performs add/remove from world logic which will also perform add/remove tracker logic
-+                }
-+
-+                if (teleportComplete != null) {
-+                    teleportComplete.accept(this);
-+                }
-+                return true;
++                // first, clear the tracker
++                passengerTree.clearTracker();
 +            }
++
++            for (EntityTreeNode entity : passengerTree.getFullTree()) {
++                entity.root.teleportSyncSameRegion(pos, yaw, pitch, velocity);
++            }
++
++            if (hasPassengers) {
++                passengerTree.restore();
++                // re-add to the tracker once the tree is restored
++                passengerTree.addTracker();
++
++                // adjust entities to final position
++                passengerTree.adjustRiders(true);
++
++                // the tracker clear/add logic is only used in the same region, as the other logic
++                // performs add/remove from world logic which will also perform add/remove tracker logic
++            }
++
++            if (teleportComplete != null) {
++                teleportComplete.accept(this);
++            }
++            return true;
 +        }
 +
 +        EntityTreeNode passengerTree = this.detachPassengers();
@@ -15214,7 +15207,7 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
          // Paper start - Fix item duplication and teleport issues
          if ((!this.isAlive() || !this.valid) && (teleportTransition.newLevel() != this.level)) {
              LOGGER.warn("Illegal Entity Teleport {} to {}:{}", this, teleportTransition.newLevel(), teleportTransition.position(), new Throwable());
-@@ -4197,6 +5012,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4197,6 +5005,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          }
      }
  
@@ -15227,7 +15220,7 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
      protected void removeAfterChangingDimensions() {
          this.setRemoved(Entity.RemovalReason.CHANGED_DIMENSION, null); // CraftBukkit - add Bukkit remove cause
          if (this instanceof Leashable leashable && leashable.isLeashed()) { // Paper - only call if it is leashed
-@@ -4497,6 +5318,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4497,6 +5311,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
      }
  
      public void startSeenByPlayer(ServerPlayer player) {
@@ -15240,7 +15233,7 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
      }
  
      public void stopSeenByPlayer(ServerPlayer player) {
-@@ -4506,6 +5333,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -4506,6 +5326,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              new io.papermc.paper.event.player.PlayerUntrackEntityEvent(player.getBukkitEntity(), this.getBukkitEntity()).callEvent();
          }
          // Paper end - entity tracking events
@@ -15253,7 +15246,7 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
      }
  
      public float rotate(Rotation transformRotation) {
-@@ -5032,7 +5865,8 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5032,7 +5858,8 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
              return;
          }
          // Paper end - Block invalid positions and bounding box
@@ -15263,7 +15256,7 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
              synchronized (this.posLock) { // Paper - detailed watchdog information
              this.position = new Vec3(x, y, z);
              } // Paper - detailed watchdog information
-@@ -5065,7 +5899,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5065,7 +5892,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          }
          // Paper start - Block invalid positions and bounding box; don't allow desync of pos and AABB
          // hanging has its own special logic
@@ -15272,7 +15265,7 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
              this.setBoundingBox(this.makeBoundingBox());
          }
          // Paper end - Block invalid positions and bounding box
-@@ -5171,6 +6005,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5171,6 +5998,12 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          return this.removalReason != null;
      }
  
@@ -15285,7 +15278,7 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
      public Entity.@Nullable RemovalReason getRemovalReason() {
          return this.removalReason;
      }
-@@ -5185,6 +6025,9 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5185,6 +6018,9 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          // Paper end - rewrite chunk system
          org.bukkit.craftbukkit.event.CraftEventFactory.callEntityRemoveEvent(this, cause); // CraftBukkit
          final boolean alreadyRemoved = this.removalReason != null; // Paper - Folia schedulers
@@ -15295,7 +15288,7 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
          if (this.removalReason == null) {
              this.removalReason = removalReason;
          }
-@@ -5208,6 +6051,10 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5208,6 +6044,10 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
          this.removalReason = null;
      }
  
@@ -15306,7 +15299,7 @@ index 21d0de44d9055a5e80c551402abdb7e352dcb0c9..d150493ac4414f0d68d351ab2a4d68c3
      // Paper start - Folia schedulers
      /**
       * Invoked only when the entity is truly removed from the server, never to be added to any world.
-@@ -5219,7 +6066,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
+@@ -5219,7 +6059,7 @@ public abstract class Entity implements SyncedDataHolder, DebugValueSource, Name
      // Paper end - Folia schedulers
      // Paper start - optimise Folia entity scheduler
      public final void registerScheduler() {
