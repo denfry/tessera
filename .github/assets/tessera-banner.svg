@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 160" width="640" height="160" role="img" aria-labelledby="t">
+  <title id="t">Tessera</title>
+  <style>
+    .word { fill: #1f2937; font: 700 72px "Segoe UI", Helvetica, Arial, sans-serif; letter-spacing: -1px; }
+    .sub { fill: #64748b; font: 400 20px "Segoe UI", Helvetica, Arial, sans-serif; }
+    @media (prefers-color-scheme: dark) { .word { fill: #e6edf3; } .sub { fill: #8b949e; } }
+  </style>
+  <g transform="translate(16 16)">
+    <rect x="6" y="6" width="16" height="16" rx="3" fill="#14b8a6"/>
+    <rect x="26" y="6" width="16" height="16" rx="3" fill="#0d9488"/>
+    <rect x="46" y="6" width="16" height="16" rx="3" fill="#2dd4bf"/>
+    <rect x="66" y="6" width="16" height="16" rx="3" fill="#14b8a6"/>
+    <rect x="86" y="6" width="16" height="16" rx="3" fill="#f59e0b"/>
+    <rect x="106" y="6" width="16" height="16" rx="3" fill="#0d9488"/>
+    <rect x="6" y="26" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="26" y="26" width="16" height="16" rx="3" fill="#0d9488"/>
+    <rect x="46" y="26" width="16" height="16" rx="3" fill="#14b8a6"/>
+    <rect x="66" y="26" width="16" height="16" rx="3" fill="#2dd4bf"/>
+    <rect x="86" y="26" width="16" height="16" rx="3" fill="#0d9488"/>
+    <rect x="106" y="26" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="6" y="46" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="26" y="46" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="46" y="46" width="16" height="16" rx="3" fill="#0d9488"/>
+    <rect x="66" y="46" width="16" height="16" rx="3" fill="#14b8a6"/>
+    <rect x="86" y="46" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="106" y="46" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="6" y="66" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="46" y="66" width="16" height="16" rx="3" fill="#2dd4bf"/>
+    <rect x="66" y="66" width="16" height="16" rx="3" fill="#0d9488"/>
+    <rect x="86" y="66" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="6" y="86" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="26" y="86" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="46" y="86" width="16" height="16" rx="3" fill="#14b8a6"/>
+    <rect x="66" y="86" width="16" height="16" rx="3" fill="#0f766e"/>
+    <rect x="86" y="86" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="106" y="86" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="26" y="106" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+    <rect x="46" y="106" width="16" height="16" rx="3" fill="#0d9488"/>
+    <rect x="66" y="106" width="16" height="16" rx="3" fill="#0f766e"/>
+    <rect x="106" y="106" width="16" height="16" rx="3" fill="#94a3b8" fill-opacity=".22"/>
+  </g>
+  <text class="word" x="176" y="92">Tessera</text>
+  <text class="sub" x="179" y="126">Regionised multithreading, built on Folia</text>
+</svg>

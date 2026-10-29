@@ -10,3 +10,7 @@
 # Binary files should be left untouched
 *.jar           binary
 
+
+# Patch files and shell scripts must keep LF, even with core.autocrlf=true
+*.patch         text eol=lf
+*.sh            text eol=lf
