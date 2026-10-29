@@ -40,8 +40,24 @@ jobs:
       - name: Build Paperclip
         run: ./gradlew createPaperclipJar --stacktrace
 
+      - name: Rename jar
+        id: jar
+        run: |
+          mc=$(grep '^mcVersion' gradle.properties | cut -d= -f2 | tr -d ' ')
+          name="tessera-${mc}-${BUILD_NUMBER}.jar"
+          cp folia-server/build/libs/*-paperclip-*.jar "$name"
+          sha256sum "$name" > "$name.sha256"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "tag=${mc}-build.${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
+
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
           name: tessera-${{ github.run_number }}
-          path: folia-server/build/libs/*-paperclip-*.jar
+          path: ${{ steps.jar.outputs.name }}
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.jar.outputs.tag }}"             "${{ steps.jar.outputs.name }}" "${{ steps.jar.outputs.name }}.sha256"             --target "$GITHUB_SHA"             --title "Tessera ${{ steps.jar.outputs.tag }}"             --notes "Build ${BUILD_NUMBER} from $(git rev-parse --short HEAD). Changes on top of Folia: see PATCHES.md."             --prerelease
