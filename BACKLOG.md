@@ -42,25 +42,6 @@
 
 ## P0 — блокирует переезд
 
-### T-001 API загрузки и выгрузки миров — [#134](https://github.com/PaperMC/Folia/issues/134)
-- **Зачем.** Multiverse-Core на Folia не работает. Без него не загрузить миры `forpost` и `dragon_arena` на main. Сейчас на
-  Folia `Bukkit.createWorld` / `unloadWorld` бросают UnsupportedOperationException.
-- **Где.**
-  - `CraftServer#createWorld` / `#unloadWorld` (paper-server, патч Folia «Region-Threading-Base»);
-  - `MinecraftServer` (создание `ServerLevel`, `levels`);
-  - `RegionizedServer` (глобальный тик обходит миры);
-  - `ThreadedRegionizer` / `TickRegions` (регионизатор на каждый мир);
-  - чанковая система moonrise (`ChunkTaskScheduler`, `ChunkHolderManager#close`).
-- **Готово, когда.**
-  - `createWorld(WorldCreator)` из глобального потока создаёт мир, мир тикает регионами, игроков можно телепортировать
-    туда через `teleportAsync`.
-  - `unloadWorld(world, save)` выгоняет игроков (или отказывает, если они там), сохраняет чанки, останавливает
-    регионизатор и чанковую систему мира и убирает мир из списка.
-  - Повторная загрузка того же мира работает.
-  - Вызов не из глобального потока — понятная ошибка.
-- **Проверка.** Тестовый плагин создаёт мир по команде, бот телепортируется туда и обратно, мир выгружается, сервер
-  останавливается без ошибок. Повторить загрузку и выгрузку 10 раз — без утечек потоков (`jcmd <pid> Thread.print`).
-
 ### T-002 `PlayerTeleportEvent` для всех телепортов — [#490](https://github.com/PaperMC/Folia/issues/490), [#330](https://github.com/PaperMC/Folia/issues/330)
 - **Зачем.** Сейчас событие приходит только для хоруса, слезания с транспорта и выхода из кровати. Для жемчуга, порталов,
   `teleportAsync`, `/tp` его нет, а на нём держатся плагины защиты регионов (запрет входа), `/back` и античиты.
@@ -271,6 +252,7 @@
 - **T-062** Проверка версий для Tessera: `/version` сейчас пишет «Unknown version». Сделать проверку по GitHub Releases
   `denfry/tessera`.
 - **T-063** CI: прогон `tools/joinbot.py` на собранном jar в Actions (сервер, два бота, вход и выход, остановка без ERROR).
+- **T-064** Края выгрузки миров (после T-001): сущность или игрок, чей асинхронный телепорт в мир начался до `unloadWorld`, и вход игрока, сохранённого в этом мире, в момент выгрузки. Сейчас `unloadWorld` проверяет только игроков в мире и запрещает новые `teleportAsync` туда. Пока мир сохраняется, глобальный поток ждёт (на тестах 0,1–1,4 с).
 
 ---
 
@@ -294,3 +276,4 @@
 | Потокобезопасные hide/showPlayer | #406 | paper 0007 |
 | Кэш типов целей мобов | #522 | paper 0008 |
 | Брендинг Tessera, GitHub Release на каждую сборку | — | build.gradle.kts.patch, release.yml |
+| Загрузка и выгрузка миров (`createWorld` / `unloadWorld`), T-001 | #134 | 0025 / paper 0010 |

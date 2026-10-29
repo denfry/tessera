@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 14:48:36 +0300
+Subject: [PATCH] Implement createWorld and unloadWorld
+
+Creating a world works like loading the worlds on startup: spawn
+chunks are loaded through the non-full sync load, which is allowed on
+any tick thread, and the world is then added to the global tick. It is
+allowed on the global region and while plugins are enabled on startup.
+
+Unloading is done on the global region through
+RegionShutdownThread#unloadWorld. The world map is now copy on write
+because it is read from every region.
+
+Fixes PaperMC/Folia#134
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index c1f7510917ebe606280c63d6150829fb0562f474..c5ceaa7dabc5d52fcc00d16866ab8b802a4b83f5 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -257,7 +257,7 @@ public final class CraftServer implements Server {
+     private final StructureManager structureManager;
+     final DedicatedServer console;
+     private final DedicatedPlayerList playerList;
+-    private final Map<String, World> worlds = new LinkedHashMap<>();
++    private volatile Map<String, World> worlds = new LinkedHashMap<>(); // Tessera - world loading API - copy on write, read from every region
+     private YamlConfiguration configuration;
+     private YamlConfiguration commandsConfiguration;
+     private final Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
+@@ -1178,7 +1178,12 @@ public final class CraftServer implements Server {
+ 
+     @Override
+     public World createWorld(WorldCreator creator) {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not implemented properly yet
++        // Tessera start - world loading API
++        if (!io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()
++            && !(ca.spottedleaf.moonrise.common.util.TickThread.isTickThread() && !io.papermc.paper.threadedregions.RegionizedServer.getInstance().isStarted())) {
++            throw new IllegalStateException("Worlds can only be created on the global region thread (see Bukkit#getGlobalRegionScheduler) or while plugins are enabled on startup, current thread: " + Thread.currentThread().getName());
++        }
++        // Tessera end - world loading API
+         Preconditions.checkState(this.console.getAllLevels().iterator().hasNext(), "Cannot create additional worlds on STARTUP");
+         //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot create a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
+         Preconditions.checkArgument(creator != null, "WorldCreator cannot be null");
+@@ -1336,7 +1341,7 @@ public final class CraftServer implements Server {
+ 
+     @Override
+     public boolean unloadWorld(World world, boolean save) {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not implemented properly yet
++        io.papermc.paper.threadedregions.RegionizedServer.ensureGlobalTickThread("Worlds can only be unloaded on the global region thread (see Bukkit#getGlobalRegionScheduler), current thread: " + Thread.currentThread().getName()); // Tessera - world loading API
+         //Preconditions.checkState(!this.console.isIteratingOverLevels, "Cannot unload a world while worlds are being ticked"); // Paper - Cat - Temp disable. We'll see how this goes.
+         if (world == null) {
+             return false;
+@@ -1361,18 +1366,19 @@ public final class CraftServer implements Server {
+             return false;
+         }
+ 
++        // Tessera start - world loading API
++        handle.tesseraUnloading = true;
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().removeWorld(handle);
+         try {
+-            if (save) {
+-                handle.save(null, true, false); // Paper - Fix saving in unloadWorld
+-            }
+-
+-            handle.getChunkSource().close(save);
+-            io.papermc.paper.FeatureHooks.closeEntityManager(handle, save); // SPIGOT-6722: close entityManager // Paper - chunk system
++            io.papermc.paper.threadedregions.RegionShutdownThread.unloadWorld(handle, save);
+         } catch (Exception ex) {
+             this.getLogger().log(Level.SEVERE, null, ex);
+         }
+ 
+-        this.worlds.remove(world.getName().toLowerCase(Locale.ROOT));
++        final Map<String, World> newWorlds = new LinkedHashMap<>(this.worlds);
++        newWorlds.remove(world.getName().toLowerCase(Locale.ROOT));
++        this.worlds = newWorlds;
++        // Tessera end - world loading API
+         this.console.removeLevel(handle);
+         return true;
+     }
+@@ -1424,7 +1430,11 @@ public final class CraftServer implements Server {
+             System.out.println("World " + world.key().asString() + " is a duplicate of another world and has been prevented from loading. Please remove or change the duplicated Paper world metadata before loading it again.");
+             return;
+         }
+-        this.worlds.put(world.getName().toLowerCase(Locale.ROOT), world);
++        // Tessera start - world loading API
++        final Map<String, World> newWorlds = new LinkedHashMap<>(this.worlds);
++        newWorlds.put(world.getName().toLowerCase(Locale.ROOT), world);
++        this.worlds = newWorlds;
++        // Tessera end - world loading API
+     }
+ 
+     @Override
