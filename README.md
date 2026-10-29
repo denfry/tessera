@@ -75,7 +75,8 @@ Layout is inherited from Folia so upstream merges stay cheap:
 - `folia-server/paper-patches/` — patches to Paper server sources.
 - `folia-api/paper-patches/` — patches to the API.
 
-Tessera patches start at `1000-` so they never collide with upstream numbering. Workflow:
+Tessera patches go after the upstream Folia patches in each directory; paperweight numbers them in
+order on every rebuild. Workflow:
 edit sources under `folia-server/src/minecraft` or `paper-server`, commit there, then rebuild the
 patch files with `./rb.sh` (`rb.bat` on Windows).
 

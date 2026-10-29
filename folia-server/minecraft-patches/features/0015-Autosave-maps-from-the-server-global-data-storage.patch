@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 11:56:35 +0300
+Subject: [PATCH] Autosave maps from the server-global data storage
+
+Map data moved to MinecraftServer#getDataStorage in 26.1, but the Folia
+autosave still saved each world's own storage, so map .dat files were
+only written on a clean shutdown and a crash lost every map change since
+startup. Save the server storage once per autosave period from the
+global tick instead.
+
+Fixes PaperMC/Folia#505
+Based on PaperMC/Folia#506 (HP-network)
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 075bef51d0c174f59a9a5c8b2bbff740111b1a13..c88eae1fd42da273654def224057db5bcc48a969 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -259,6 +259,8 @@ public final class RegionizedServer {
+             this.globalTick(world, tickCount);
+         }
+ 
++        this.autoSaveMaps(); // Tessera - maps live in the server-global storage
++
+         // tick connections
+         this.tickConnections();
+ 
+@@ -374,7 +376,6 @@ public final class RegionizedServer {
+ 
+         world.moonrise$getChunkTaskScheduler().chunkHolderManager.processTicketUpdates(); // required to eventually process ticket updates
+ 
+-        this.autoSaveMaps(world);
+     }
+ 
+     private void updateRaids(final ServerLevel world) {
+@@ -415,14 +416,19 @@ public final class RegionizedServer {
+         }
+     }
+ 
+-    private void autoSaveMaps(final ServerLevel world) {
+-        final int autoSavePeriod = net.minecraft.server.MinecraftServer.getServer().autosavePeriod;
++    // Tessera start - maps live in the server-global storage
++    private long lastMapAutoSave = System.nanoTime();
++
++    private void autoSaveMaps() {
++        final MinecraftServer server = MinecraftServer.getServer();
++        final int autoSavePeriod = server.autosavePeriod;
+         final long currTime = System.nanoTime();
+-        if (autoSavePeriod > 0 && (currTime - world.lastMapAutoSave) > (java.util.concurrent.TimeUnit.SECONDS.toNanos((long)autoSavePeriod) / 20L)) {
+-            world.lastMapAutoSave = currTime;
+-            world.getDataStorage().saveMaps();
++        if (autoSavePeriod > 0 && (currTime - this.lastMapAutoSave) > (java.util.concurrent.TimeUnit.SECONDS.toNanos((long)autoSavePeriod) / 20L)) {
++            this.lastMapAutoSave = currTime;
++            server.getDataStorage().saveMaps();
+         }
+     }
++    // Tessera end - maps live in the server-global storage
+ 
+     public static final record WorldLevelData(ServerLevel world, long nonRedstoneGameTime) {}
+ }
+\ No newline at end of file
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 3d352bb9b0606236d789a70897d7bec12bcf6846..15ee597339e51998b69c8a68071b2bc2a1f96fc2 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -726,7 +726,6 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     public static final record PendingTeleport(Entity.EntityTreeNode rootVehicle, Vec3 to) {}
+     private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<PendingTeleport> pendingTeleports = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
+ 
+-    public long lastMapAutoSave = System.nanoTime();
+ 
+     public void pushPendingTeleport(final PendingTeleport teleport) {
+         synchronized (this.pendingTeleports) {

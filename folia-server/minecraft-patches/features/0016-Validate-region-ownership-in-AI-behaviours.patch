@@ -1,0 +1,193 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 11:57:24 +0300
+Subject: [PATCH] Validate region ownership in AI behaviours
+
+Brain memories and sensor results keep references to entities, beds,
+job sites and leash targets after those move into another region or
+dimension. Reading them from the wrong region throws a thread check
+exception inside Level#guardEntityTick, which then discards the ticking
+mob (villagers, allays, babies, leashed animals, their vehicles).
+
+Check ownership before reading cached targets:
+- nearest living/visible entity sensors and memories, BabyFollowAdult
+- AssignProfessionFromJobSite (other dimension or region job site)
+- JumpOnBed bed lookups
+- GoToWantedItem item targets, including targets replaced by plugins
+- delayed leash info pointing to an entity or knot in another region
+
+Based on PaperMC/Folia#523, #525, #526, #527 (PluginsKers) and
+PaperMC/Folia#495 (Dueris)
+
+diff --git a/net/minecraft/world/entity/Leashable.java b/net/minecraft/world/entity/Leashable.java
+index 98034a4c96bf2972316078d3b3a49140921aab50..ce1ec95ebdfbc199fce9539671a8dd18166279b6 100644
+--- a/net/minecraft/world/entity/Leashable.java
++++ b/net/minecraft/world/entity/Leashable.java
+@@ -94,11 +94,11 @@ public interface Leashable {
+             Optional<BlockPos> pos = leashData.delayedLeashInfo.right();
+             if (leashUuid.isPresent()) {
+                 Entity leasher = serverLevel.getEntity(leashUuid.get());
+-                if (leasher != null) {
++                if (leasher != null && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(leasher)) { // Tessera - region threading
+                     setLeashedTo(entity, leasher, true);
+                     return;
+                 }
+-            } else if (pos.isPresent()) {
++            } else if (pos.isPresent() && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(serverLevel, pos.get())) { // Tessera - region threading
+                 setLeashedTo(entity, LeashFenceKnotEntity.getOrCreateKnot(serverLevel, pos.get()), true);
+                 return;
+             }
+diff --git a/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java b/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
+index bae514a553838e5e4a3d91a2713693a4847aad02..dfc75e52679024c23dc154b86a599bc870a8e9d5 100644
+--- a/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
++++ b/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
+@@ -20,6 +20,11 @@ public class AssignProfessionFromJobSite {
+                     i,
+                     (potentialJobSite, jobSite) -> (level, body, timestamp) -> {
+                         GlobalPos pos = i.get(potentialJobSite);
++                        // Tessera start - region threading
++                        if (pos.dimension() != level.dimension() || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, pos.pos())) {
++                            return false;
++                        }
++                        // Tessera end - region threading
+                         if (!pos.pos().closerToCenterThan(body.position(), 2.0)) {
+                             return false;
+                         }
+diff --git a/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java b/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
+index 801ba5da1fa5fb8b2fc6e76053cf150c040f455a..82549c4c00c1b03ea3229cd0474a4a912c7be9df 100644
+--- a/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
++++ b/net/minecraft/world/entity/ai/behavior/BabyFollowAdult.java
+@@ -27,6 +27,12 @@ public class BabyFollowAdult {
+                             return false;
+                         } else {
+                             LivingEntity adult = i.get(nearestAdult);
++                            // Tessera start - AI target memories can outlive region ownership
++                            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(adult)) {
++                                nearestAdult.erase();
++                                return false;
++                            }
++                            // Tessera end - AI target memories can outlive region ownership
+                             if (body.closerThan(adult, followRange.maxInclusive() + 1) && !body.closerThan(adult, followRange.minInclusive())) {
+                                 // CraftBukkit start
+                                 org.bukkit.event.entity.EntityTargetLivingEntityEvent event = org.bukkit.craftbukkit.event.CraftEventFactory.callEntityTargetLivingEvent(body, adult, org.bukkit.event.entity.EntityTargetEvent.TargetReason.FOLLOW_LEADER);
+@@ -37,6 +43,11 @@ public class BabyFollowAdult {
+                                     walkTarget.erase();
+                                     return true;
+                                 }
++                                // Tessera start - plugins can replace targets across region boundaries
++                                if (!org.bukkit.Bukkit.isOwnedByCurrentRegion(event.getTarget())) {
++                                    return false;
++                                }
++                                // Tessera end - plugins can replace targets across region boundaries
+                                 adult = ((org.bukkit.craftbukkit.entity.CraftLivingEntity) event.getTarget()).getHandle();
+                                 // CraftBukkit end
+                                 WalkTarget target = new WalkTarget(
+diff --git a/net/minecraft/world/entity/ai/behavior/GoToWantedItem.java b/net/minecraft/world/entity/ai/behavior/GoToWantedItem.java
+index aff2db230f992b1cd139de0997497322f0efc419..079e68ebf87db1cc49b7cc57e1473498b4ce38df 100644
+--- a/net/minecraft/world/entity/ai/behavior/GoToWantedItem.java
++++ b/net/minecraft/world/entity/ai/behavior/GoToWantedItem.java
+@@ -33,6 +33,7 @@ public class GoToWantedItem {
+                         (lookTarget, walkTarget, wantedItem, cooldown) -> (level, body, timestamp) -> {
+                             ItemEntity item = i.get(wantedItem);
+                             if (i.tryGet(cooldown).isEmpty()
++                                && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(item) // Tessera - region threading
+                                 && predicate.test(body)
+                                 && item.closerThan(body, maxDistToWalk)
+                                 && body.level().getWorldBorder().isWithinBounds(item.blockPosition())
+@@ -49,6 +50,7 @@ public class GoToWantedItem {
+                                         return false; // Paper - only erase allay memory on non-item targets
+                                     }
+ 
++                                    if (!org.bukkit.Bukkit.isOwnedByCurrentRegion(targetItem)) return false; // Tessera - region threading
+                                     item = targetItem.getHandle();
+                                 }
+                                 // CraftBukkit end
+diff --git a/net/minecraft/world/entity/ai/behavior/JumpOnBed.java b/net/minecraft/world/entity/ai/behavior/JumpOnBed.java
+index 1d55d74ff31d2d859f32ab1afac4580625b44206..2c842fc90423be2c2f37d65289f4242421f78ce7 100644
+--- a/net/minecraft/world/entity/ai/behavior/JumpOnBed.java
++++ b/net/minecraft/world/entity/ai/behavior/JumpOnBed.java
+@@ -101,7 +101,7 @@ public class JumpOnBed extends Behavior<Mob> {
+     }
+ 
+     private boolean isJumpable(final ServerLevel level, final BlockPos bodyPos) {
+-        return level.getBlockState(bodyPos).is(BlockTags.VILLAGER_BABIES_CAN_JUMP_ON_BED);
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, bodyPos) && level.getBlockState(bodyPos).is(BlockTags.VILLAGER_BABIES_CAN_JUMP_ON_BED); // Tessera - region threading
+     }
+ 
+     private Optional<BlockPos> getNearestBed(final Mob body) {
+diff --git a/net/minecraft/world/entity/ai/memory/NearestVisibleLivingEntities.java b/net/minecraft/world/entity/ai/memory/NearestVisibleLivingEntities.java
+index 5c967b55f6ad3b660e9cdf74fadd90c5ea67afb9..f83a739c0c1165e1c62c32057f449e336b5abd58 100644
+--- a/net/minecraft/world/entity/ai/memory/NearestVisibleLivingEntities.java
++++ b/net/minecraft/world/entity/ai/memory/NearestVisibleLivingEntities.java
+@@ -32,6 +32,14 @@ public class NearestVisibleLivingEntities {
+         return EMPTY;
+     }
+ 
++    // Tessera start - sensor memories can outlive region ownership
++    private boolean isMatchingAndVisible(final LivingEntity entity, final Predicate<LivingEntity> filter) {
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)
++            && filter.test(entity)
++            && this.lineOfSightTest.test(entity);
++    }
++    // Tessera end - sensor memories can outlive region ownership
++
+     @VisibleForDebug
+     public List<LivingEntity> nearbyEntities() {
+         return this.nearbyEntities;
+@@ -39,7 +47,7 @@ public class NearestVisibleLivingEntities {
+ 
+     public Optional<LivingEntity> findClosest(final Predicate<LivingEntity> filter) {
+         for (LivingEntity nearbyEntity : this.nearbyEntities) {
+-            if (filter.test(nearbyEntity) && this.lineOfSightTest.test(nearbyEntity)) {
++            if (this.isMatchingAndVisible(nearbyEntity, filter)) { // Tessera - validate cached sensor entity ownership
+                 return Optional.of(nearbyEntity);
+             }
+         }
+@@ -48,20 +56,24 @@ public class NearestVisibleLivingEntities {
+     }
+ 
+     public Iterable<LivingEntity> findAll(final Predicate<LivingEntity> filter) {
+-        return Iterables.filter(this.nearbyEntities, entity -> filter.test(entity) && this.lineOfSightTest.test(entity));
++        return Iterables.filter(this.nearbyEntities, entity -> this.isMatchingAndVisible(entity, filter)); // Tessera - validate cached sensor entity ownership
+     }
+ 
+     public Stream<LivingEntity> find(final Predicate<LivingEntity> filter) {
+-        return this.nearbyEntities.stream().filter(entity -> filter.test(entity) && this.lineOfSightTest.test(entity));
++        return this.nearbyEntities.stream().filter(entity -> this.isMatchingAndVisible(entity, filter)); // Tessera - validate cached sensor entity ownership
+     }
+ 
+     public boolean contains(final LivingEntity targetEntity) {
+-        return this.nearbyEntities.contains(targetEntity) && this.lineOfSightTest.test(targetEntity);
++        // Tessera start - sensor memories can outlive region ownership
++        return ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(targetEntity)
++            && this.nearbyEntities.contains(targetEntity)
++            && this.lineOfSightTest.test(targetEntity);
++        // Tessera end - sensor memories can outlive region ownership
+     }
+ 
+     public boolean contains(final Predicate<LivingEntity> filter) {
+         for (LivingEntity nearbyEntity : this.nearbyEntities) {
+-            if (filter.test(nearbyEntity) && this.lineOfSightTest.test(nearbyEntity)) {
++            if (this.isMatchingAndVisible(nearbyEntity, filter)) { // Tessera - validate cached sensor entity ownership
+                 return true;
+             }
+         }
+diff --git a/net/minecraft/world/entity/ai/sensing/NearestLivingEntitySensor.java b/net/minecraft/world/entity/ai/sensing/NearestLivingEntitySensor.java
+index 3578ece216827fd5d8c1206c689fc608e97b50df..30e7a1695e446cfa005904fbaf3c333755840063 100644
+--- a/net/minecraft/world/entity/ai/sensing/NearestLivingEntitySensor.java
++++ b/net/minecraft/world/entity/ai/sensing/NearestLivingEntitySensor.java
+@@ -17,7 +17,13 @@ public class NearestLivingEntitySensor<T extends LivingEntity> extends Sensor<T>
+     protected void doTick(final ServerLevel level, final T body) {
+         double followRange = body.getAttributeValue(Attributes.FOLLOW_RANGE);
+         AABB boundingBox = body.getBoundingBox().inflate(followRange, followRange, followRange);
+-        List<LivingEntity> livingEntities = level.getEntitiesOfClass(LivingEntity.class, boundingBox, mob -> mob != body && mob.isAlive());
++        // Tessera start - only the owning region may read entity state
++        List<LivingEntity> livingEntities = level.getEntitiesOfClass(
++            LivingEntity.class,
++            boundingBox,
++            mob -> mob != body && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(mob) && mob.isAlive()
++        );
++        // Tessera end - only the owning region may read entity state
+         livingEntities.sort(Comparator.comparingDouble(body::distanceToSqr));
+         Brain<?> brain = body.getBrain();
+         brain.setMemory(MemoryModuleType.NEAREST_LIVING_ENTITIES, livingEntities);

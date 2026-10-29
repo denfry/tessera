@@ -75,7 +75,8 @@ java -Xms4G -Xmx4G -jar server.jar --nogui   # server.jar — скачанный
 - `folia-server/paper-patches/` — патчи к исходникам сервера Paper.
 - `folia-api/paper-patches/` — патчи к API.
 
-Патчи Tessera нумеруются с `1000-`, чтобы не пересекаться с нумерацией upstream. Порядок работы:
+Патчи Tessera идут после патчей upstream Folia в каждой папке; номера paperweight расставляет сам
+при каждой пересборке. Порядок работы:
 правите исходники в `folia-server/src/minecraft` или `paper-server`, коммитите там, затем
 пересобираете файлы патчей через `./rb.sh` (`rb.bat` на Windows).
 

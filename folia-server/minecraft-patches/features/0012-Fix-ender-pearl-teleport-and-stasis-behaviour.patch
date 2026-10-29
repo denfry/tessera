@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 11:55:04 +0300
+Subject: [PATCH] Fix ender pearl teleport and stasis behaviour
+
+- Teleport to the pearl's previous position like Paper does; the current
+  position can lie on a collision surface and put the player in a wall.
+- Report the pearl, not the player, as the damager of the landing damage
+  (EntityDamageByEntityEvent#getDamager).
+- Do not discard pearls while the owner is removed from its world for an
+  asynchronous teleport (portal travel), and still teleport the owner when
+  the pearl lands in that window. Fixes stasis chambers breaking when the
+  player changes dimension.
+
+Fixes PaperMC/Folia#421, PaperMC/Folia#438
+Based on PaperMC/Folia#529 (strobil), PaperMC/Folia#442 (vLuckyyy),
+PaperMC/Folia#510 (vertraxumtesOG)
+
+diff --git a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+index 4516bfad2d1907c6161fbf0bf2105efb5ce5228c..d004c138f959168c5032d8b56aee8af53150587e 100644
+--- a/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
++++ b/net/minecraft/world/entity/projectile/throwableitemprojectile/ThrownEnderpearl.java
+@@ -78,7 +78,7 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+     }
+ 
+     // Folia start - region threading
+-    private static void attemptTeleport(Entity source, ServerLevel checkWorld, net.minecraft.world.phys.Vec3 to) {
++    private static void attemptTeleport(Entity source, Entity enderPearl, ServerLevel checkWorld, net.minecraft.world.phys.Vec3 to) { // Tessera - report the pearl as damager
+         final boolean onPortalCooldown = source.isOnPortalCooldown();
+         // ignore retired callback, in those cases we do not want to teleport
+         source.getBukkitEntity().taskScheduler.schedule(
+@@ -137,7 +137,7 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+                             // damage player
+                             teleported.resetFallDistance();
+                             player.resetCurrentImpulseContext();
+-                            player.hurtServer(player.level(), player.damageSources().enderPearl().eventEntityDamager(player), 5.0F); // CraftBukkit // Paper - fix DamageSource API
++                            player.hurtServer(player.level(), player.damageSources().enderPearl().eventEntityDamager(enderPearl), 5.0F); // CraftBukkit // Paper - fix DamageSource API // Tessera - report the pearl as damager
+                             playSound(teleported.level(), to);
+                         } else {
+                             // reset fall damage so that if the entity was falling they do not instantly die
+@@ -177,9 +177,17 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+                     throw new IllegalStateException("Must be on tick thread for ticking entity: " + this);
+                 }
+                 Entity entity = this.getOwnerRaw();
++                // Tessera start - fix ender pearl teleports
++                if (entity == null && this.owner != null) {
++                    // the owning player is removed from its world while teleporting asynchronously,
++                    // the entity scheduler runs the teleport once the player is placed again
++                    entity = level.getServer().getPlayerList().getPlayer(this.owner.getUUID());
++                }
+                 if (entity != null) {
+-                    attemptTeleport(entity, (ServerLevel)this.level(), this.position());
++                    // use the previous position like Paper, the current one may lie on the collision surface
++                    attemptTeleport(entity, this, (ServerLevel)this.level(), this.oldPosition());
+                 }
++                // Tessera end - fix ender pearl teleports
+                 this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.HIT);
+                 return;
+             }
+@@ -263,6 +271,7 @@ public class ThrownEnderpearl extends ThrowableItemProjectile {
+             Entity owner = this.owner != null ? findOwnerIncludingDeadPlayer(serverLevel, this.owner.getUUID()) : null;
+             if (owner instanceof ServerPlayer serverPlayer
+                 && !owner.isAlive()
++                && (serverPlayer.isDeadOrDying() || serverPlayer.getRemovalReason() != Entity.RemovalReason.CHANGED_DIMENSION) // Tessera - owner is temporarily removed while teleporting asynchronously
+                 && !serverPlayer.wonGame
+                 && serverPlayer.level().getGameRules().get(GameRules.ENDER_PEARLS_VANISH_ON_DEATH)) {
+                 this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN); // CraftBukkit - add Bukkit remove cause
