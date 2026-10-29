@@ -1,0 +1,238 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 14:48:36 +0300
+Subject: [PATCH] Allow worlds to be unloaded while the server is running
+
+The chunks of a world are owned by the regions that tick it, so a world
+cannot simply be closed from another thread. To unload a world, take
+every region of the world from the scheduler the same way the scheduler
+acquires a region before ticking it, then save and close the world on a
+shutdown thread exactly like on server shutdown. Teleports into a world
+that is being unloaded are refused.
+
+Also track whether the region scheduler has started, so that worlds can
+be created by plugins while they are enabled on startup.
+
+Part of PaperMC/Folia#134
+
+diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
+index f7755bd21513bed2725959e37096e26ad32003c3..dd75e78fee5f35f6b0488e1f0d37aad0cd86f218 100644
+--- a/io/papermc/paper/threadedregions/RegionShutdownThread.java
++++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
+@@ -20,14 +20,131 @@ public final class RegionShutdownThread extends ca.spottedleaf.moonrise.common.u
+     private static volatile boolean shuttingDownServer; // Tessera - chat during shutdown
+ 
+     ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> shuttingDown;
++    // Tessera start - world loading API
++    private final ServerLevel unloadingWorld;
++    private final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> unloadingRegions;
++    private final boolean unloadingSave;
++    // Tessera end - world loading API
+ 
+     public RegionShutdownThread(final String name) {
+         super(name);
+         this.setUncaughtExceptionHandler((thread, thr) -> {
+             LOGGER.error("Error shutting down server", thr);
+         });
++        // Tessera start - world loading API
++        this.unloadingWorld = null;
++        this.unloadingRegions = null;
++        this.unloadingSave = false;
++        // Tessera end - world loading API
+     }
+ 
++    // Tessera start - world loading API
++    private RegionShutdownThread(final ServerLevel world, final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions,
++                                 final boolean save) {
++        super("Tessera World Unload Thread - " + WorldUtil.getWorldName(world));
++        this.setUncaughtExceptionHandler((thread, thr) -> {
++            LOGGER.error("Error unloading world '" + WorldUtil.getWorldName(world) + "'", thr);
++        });
++        this.unloadingWorld = world;
++        this.unloadingRegions = regions;
++        this.unloadingSave = save;
++    }
++
++    /**
++     * Saves and closes a world while the rest of the server keeps ticking. The caller must be on the global region and
++     * make sure that no player is in the world.
++     * <p>
++     * First every region of the world is taken from the scheduler, the same way the scheduler acquires a region before
++     * ticking it, so nothing ticks the world anymore. Then the world is saved and its chunk system is closed on a
++     * shutdown thread, exactly like on server shutdown.
++     * </p>
++     */
++    public static void unloadWorld(final ServerLevel world, final boolean save) {
++        RegionizedServer.ensureGlobalTickThread("Cannot unload world off global tick thread");
++
++        final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> acquired = new ArrayList<>();
++        for (;;) {
++            final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions = new ArrayList<>();
++            world.regioniser.computeForAllRegions(regions::add);
++
++            boolean waiting = false;
++            for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
++                if (acquired.contains(region)) {
++                    continue;
++                }
++                // a cancelled region is never ticked again by the scheduler
++                region.getData().getRegionSchedulingHandle().markNonSchedulable();
++                if (region.tryMarkTicking(() -> false)) {
++                    acquired.add(region);
++                } else if (!region.tesseraIsTransient()) {
++                    // still ticking on another thread
++                    waiting = true;
++                }
++                // transient regions wait to be merged into a region that we hold now, so they cannot tick either
++            }
++            if (!waiting) {
++                break;
++            }
++            Thread.onSpinWait();
++        }
++
++        final RegionShutdownThread thread = new RegionShutdownThread(world, acquired, save);
++        thread.start();
++        boolean interrupted = false;
++        for (;;) {
++            try {
++                thread.join();
++                break;
++            } catch (final InterruptedException ex) {
++                interrupted = true;
++            }
++        }
++        if (interrupted) {
++            Thread.currentThread().interrupt();
++        }
++    }
++
++    private void unloadWorld() {
++        final ServerLevel world = this.unloadingWorld;
++        LOGGER.info("Unloading world '" + WorldUtil.getWorldName(world) + "'");
++        try {
++            world.moonrise$getChunkTaskScheduler().halt(false, 0L);
++        } catch (final Throwable throwable) {
++            LOGGER.error("Failed to soft halt chunk system for world '" + WorldUtil.getWorldName(world) + "'", throwable);
++        }
++        this.haltChunkSystem(world);
++
++        // include transient regions as well
++        final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions = new ArrayList<>();
++        world.regioniser.computeForAllRegionsUnsynchronised(regions::add);
++        for (int i = 0, len = regions.size(); i < len; ++i) {
++            this.finishTeleportations(regions.get(i), world);
++        }
++
++        if (this.unloadingSave && !regions.isEmpty()) {
++            for (int i = 0, len = regions.size(); i < len; ++i) {
++                this.saveRegionChunks(regions.get(i), (i + 1) == len);
++            }
++        } else {
++            try {
++                world.moonrise$getChunkTaskScheduler().chunkHolderManager.close(false, true, false, true, false);
++            } catch (final Throwable thr) {
++                LOGGER.error("Failed to close chunk system for world '" + WorldUtil.getWorldName(world) + "'", thr);
++            }
++        }
++
++        if (this.unloadingSave) {
++            this.saveLevelData(world);
++        }
++        try {
++            world.getChunkSource().getDataStorage().close();
++        } catch (final Throwable thr) {
++            LOGGER.error("Failed to close saved data for world '" + WorldUtil.getWorldName(world) + "'", thr);
++        }
++        LOGGER.info("Unloaded world '" + WorldUtil.getWorldName(world) + "'");
++    }
++    // Tessera end - world loading API
++
+     // Tessera start - chat during shutdown
+     public static boolean isShuttingDown() {
+         return shuttingDownServer;
+@@ -205,6 +322,12 @@ public final class RegionShutdownThread extends ca.spottedleaf.moonrise.common.u
+ 
+     @Override
+     public final void run() {
++        // Tessera start - world loading API
++        if (this.unloadingWorld != null) {
++            this.unloadWorld();
++            return;
++        }
++        // Tessera end - world loading API
+         shuttingDownServer = true; // Tessera - chat during shutdown
+         // await scheduler termination
+         LOGGER.info("Awaiting scheduler termination for 60s...");
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index c88eae1fd42da273654def224057db5bcc48a969..d859c70b787e66af8cd1d0e7f40e2545a29b3cac 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -63,7 +63,20 @@ public final class RegionizedServer {
+         this.worlds.add(world);
+     }
+ 
++    // Tessera start - world loading API
++    public boolean removeWorld(final ServerLevel world) {
++        return this.worlds.remove(world);
++    }
++
++    private volatile boolean started;
++
++    public boolean isStarted() {
++        return this.started;
++    }
++    // Tessera end - world loading API
++
+     public void init() {
++        this.started = true; // Tessera - world loading API
+         // call init event _before_ scheduling anything
+         new RegionizedServerInitEvent().callEvent();
+ 
+diff --git a/io/papermc/paper/threadedregions/ThreadedRegionizer.java b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
+index 3449918b5001bb39c541ce1168eac4acf9144e1f..5fea430498113c85e283f861209691e41ea85454 100644
+--- a/io/papermc/paper/threadedregions/ThreadedRegionizer.java
++++ b/io/papermc/paper/threadedregions/ThreadedRegionizer.java
+@@ -956,6 +956,17 @@ public final class ThreadedRegionizer<R extends ThreadedRegionizer.ThreadedRegio
+             return this.data;
+         }
+ 
++        // Tessera start - world loading API
++        public boolean tesseraIsTransient() {
++            this.regioniser.acquireWriteLock();
++            try {
++                return this.state == STATE_TRANSIENT;
++            } finally {
++                this.regioniser.releaseWriteLock();
++            }
++        }
++        // Tessera end - world loading API
++
+         public boolean tryMarkTicking(final BooleanSupplier abort) {
+             this.regioniser.acquireWriteLock();
+             try {
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 15ee597339e51998b69c8a68071b2bc2a1f96fc2..a5c62db77f08effaed9e04436d093f02e8292af8 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -722,6 +722,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+         );
+     }
+     public final io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData taskQueueRegionData = new io.papermc.paper.threadedregions.RegionizedTaskQueue.WorldRegionTaskData(this);
++    public volatile boolean tesseraUnloading; // Tessera - world loading API
+ 
+     public static final record PendingTeleport(Entity.EntityTreeNode rootVehicle, Vec3 to) {}
+     private final it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<PendingTeleport> pendingTeleports = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>();
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 5bd6f844da26132341b263524723ae9cff89e877..0fef963712fef8ed3aeb58296caaa1df69fa5ef3 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4582,6 +4582,8 @@ public abstract class Entity
+                                        java.util.function.Consumer<Entity> teleportComplete) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
+ 
++        if (destination.tesseraUnloading) return false; // Tessera - world loading API
++
+         if (!ServerLevel.isInSpawnableBounds(new BlockPos(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockY(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockZ(pos)))) {
+             return false;
+         }
