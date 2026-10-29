@@ -3,7 +3,7 @@ name: Patch and Build
 on:
   push:
     branches-ignore:
-      - ver/26.3.x
+      - main
   pull_request:
 
 jobs:
