@@ -25,7 +25,7 @@ Requires Git and JDK 25 (Gradle downloads one if missing).
 
 ```bash
 ./gradlew applyAllPatches
-./gradlew createMojmapPaperclipJar   # separate run: the task exists only after patching; folia-server/build/libs/*-paperclip-*.jar
+./gradlew createPaperclipJar   # separate run: the task exists only after patching; folia-server/build/libs/*-paperclip-*.jar
 ```
 
 ## Working on patches

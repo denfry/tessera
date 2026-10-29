@@ -38,7 +38,7 @@ jobs:
           ./gradlew applyAllPatches --stacktrace
 
       - name: Build Paperclip
-        run: ./gradlew createMojmapPaperclipJar --stacktrace
+        run: ./gradlew createPaperclipJar --stacktrace
 
       - name: Upload jar
         uses: actions/upload-artifact@v4
