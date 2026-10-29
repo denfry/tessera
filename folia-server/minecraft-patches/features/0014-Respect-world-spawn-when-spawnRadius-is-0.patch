@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 11:56:03 +0300
+Subject: [PATCH] Respect world spawn when spawnRadius is 0
+
+With a respawn radius below one block the selection range is empty and
+Folia fell back to the world border centre, so players spawned at 0,0
+instead of the /setworldspawn position. Use the world spawn in that case
+and fall back to the border centre only when the spawn lies outside the
+border.
+
+Fixes PaperMC/Folia#401
+Related: PaperMC/Folia#475
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index a4bc0c8065fca739e66096c61e7c535b9e02a746..298db1183ce84457be3d9e96f0f2b75d2ac08049 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -516,8 +516,10 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         double amountX = selectMaxX - selectMinX;
+         double amountZ = selectMaxZ - selectMinZ;
+ 
+-        int selectX = amountX < 1.0 ? Mth.floor(worldBorder.getCenterX()) : (int)Mth.floor((amountX + 1.0) * random.nextDouble() + selectMinX);
+-        int selectZ = amountZ < 1.0 ? Mth.floor(worldBorder.getCenterZ()) : (int)Mth.floor((amountZ + 1.0) * random.nextDouble() + selectMinZ);
++        // Tessera start - a radius under one block (spawnRadius 0) selects the world spawn, not the border centre
++        int selectX = amountX < 0.0 ? Mth.floor(worldBorder.getCenterX()) : amountX < 1.0 ? Mth.floor(spawnX) : (int)Mth.floor((amountX + 1.0) * random.nextDouble() + selectMinX);
++        int selectZ = amountZ < 0.0 ? Mth.floor(worldBorder.getCenterZ()) : amountZ < 1.0 ? Mth.floor(spawnZ) : (int)Mth.floor((amountZ + 1.0) * random.nextDouble() + selectMinZ);
++        // Tessera end - a radius under one block (spawnRadius 0) selects the world spawn, not the border centre
+ 
+         return new BlockPos(selectX, 0, selectZ);
+     }

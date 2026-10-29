@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 11:56:53 +0300
+Subject: [PATCH] Make the player visibility map thread-safe
+
+CraftPlayer#onEntityRemove is called for every online player from the
+thread of the region that removes the entity, and canSee is read by other
+regions' trackers and the player list, while hideEntity/showEntity write
+the same HashMap from the player's region. Concurrent access corrupted
+the map and crashed regions with ArrayIndexOutOfBoundsException during
+rehash on servers that use the vanish API.
+
+Use a ConcurrentHashMap; reads stay lock-free on the hot canSee path.
+
+Fixes PaperMC/Folia#406
+Related: PaperMC/Folia#448
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index 24f7cf40ffd6bbb154dc664bc9f7e6661247f2ac..f3ec95b3a2fce21c347983ef9e9752b4d89f1b39 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -241,7 +241,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+     private long lastPlayed = 0;
+     private boolean hasPlayedBefore = false;
+     private final ConversationTracker conversationTracker = new ConversationTracker();
+-    private final Map<UUID, Set<WeakReference<Plugin>>> invertedVisibilityEntities = new HashMap<>();
++    private final Map<UUID, Set<WeakReference<Plugin>>> invertedVisibilityEntities = new java.util.concurrent.ConcurrentHashMap<>(); // Tessera - removed and read from other regions' threads
+     private final Set<UUID> unlistedEntities = new HashSet<>(); // Paper - Add Listing API for Player
+     private static final WeakHashMap<Plugin, WeakReference<Plugin>> pluginWeakReferences = new WeakHashMap<>();
+     private int hash = 0;

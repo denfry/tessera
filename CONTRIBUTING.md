@@ -52,8 +52,8 @@ To start over from the committed patch files, run `./gradlew applyAllPatches` (o
 ## Patch rules
 
 - **One change per patch.** Do not mix a bug fix with a refactor or an unrelated optimisation.
-- **Numbering.** Tessera patches sit after all upstream patches and use the `1000-` prefix, so they
-  never collide with upstream numbers. Check the file names after a rebuild and keep the prefix.
+- **Ordering.** Tessera patches sit after all upstream patches. Paperweight renumbers the files on
+  every rebuild, so after merging upstream rebase the Tessera commits on top and run `./rb.sh`.
 - **Small diffs.** Touch as few upstream lines as possible; that is what keeps merges painless.
   Mark changed lines with a `// Tessera` comment (or `// Tessera start` / `// Tessera end` around
   blocks), following the Paper and Folia convention.

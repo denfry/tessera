@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 11:55:46 +0300
+Subject: [PATCH] Disable debug subscriptions
+
+ServerDebugSubscribers keeps one HashMap for the whole server and every
+region rebuilds it from MinecraftServer#tickChildren, so two regions
+ticking at once corrupt it or throw ConcurrentModificationException,
+which kills the region and stops the server. Operators get it simply by
+joining with a client mod that requests debug data (MiniHUD).
+
+Never report subscriptions for players; the map then stays empty and the
+per-region tick no longer mutates it.
+
+Fixes PaperMC/Folia#472, PaperMC/Folia#432
+Based on PaperMC/Folia#499 (Dueris)
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 6bb34d13d6806f93a67b0d8fc63a272e7b4172d2..a4bc0c8065fca739e66096c61e7c535b9e02a746 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -3529,7 +3529,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     }
+ 
+     public Set<DebugSubscription<?>> debugSubscriptions() {
+-        return !this.server.debugSubscribers().hasRequiredPermissions(this) ? Set.of() : this.requestedDebugSubscriptions;
++        return Set.of(); // Tessera - ServerDebugSubscribers is global state mutated by every region tick, not thread-safe
+     }
+ 
+     @Override
