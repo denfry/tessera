@@ -15,6 +15,8 @@
 [![Minecraft 26.3](https://img.shields.io/badge/Minecraft-26.3-62b47a)](https://minecraft.net/)
 [![Upstream: Folia](https://img.shields.io/badge/upstream-PaperMC%2FFolia-2f81f7)](https://github.com/PaperMC/Folia)
 
+[Сайт](https://denfry.github.io/tessera/ru/) · [Скачать](https://github.com/denfry/tessera/releases) · [Патчи](PATCHES.md) · [Плагины](PLUGINS.md)
+
 </div>
 
 Tessera — форк [Folia](https://github.com/PaperMC/Folia) (региональная многопоточность поверх
@@ -22,7 +24,19 @@ Tessera — форк [Folia](https://github.com/PaperMC/Folia) (регионал
 функций для больших выживательных серверов.
 
 > [!NOTE]
-> Ранняя стадия, для продакшена пока не готово: сейчас это сборка Folia без изменений.
+> Ранняя стадия, идёт тестирование, для продакшена пока не готово. Планы — в [BACKLOG.md](BACKLOG.md).
+
+## Главное
+
+- **Скорборды** — скорборд потокобезопасен: личные доски, `Player#setScoreboard`, команды и цели
+  работают из любого потока, как и `/team` и `/scoreboard`.
+- **События телепорта** — `PlayerTeleportEvent`, `EntityTeleportEvent` и события порталов вызываются
+  для асинхронных телепортов, порталов и эндер-жемчуга.
+- **Миры на ходу** — `Bukkit.createWorld` и `unloadWorld` работают на запущенном сервере.
+- **Исправления** — эндер-жемчуг и стазис-камеры, debug-подписки MiniHUD, дракон вдали от 0,0, жители
+  в порталах, владение регионами в AI мобов, автосохранение карт и новых игроков, защита сети.
+
+Полный список со ссылками на issues апстрима — в [PATCHES.md](PATCHES.md).
 
 ## Зачем Tessera
 
@@ -86,6 +100,8 @@ java -Xms4G -Xmx4G -jar server.jar --nogui   # server.jar — скачанный
 
 Все изменения Tessera поверх Folia перечислены в [PATCHES.md](PATCHES.md): затронутая область и
 ссылка на соответствующий issue или PR в upstream, если он есть.
+
+Сторонние плагины, проверенные на Tessera, и то, как они работают, перечислены в [PLUGINS.md](PLUGINS.md).
 
 ## Отношения с upstream
 

@@ -42,12 +42,13 @@ if (grid) {
   }
 }
 
-// Latest release tag, if there is one.
+// Latest release tag (pre-releases included), if there is one.
 const rel = document.querySelector("[data-release]");
 if (rel) {
-  fetch("https://api.github.com/repos/denfry/tessera/releases/latest")
+  fetch("https://api.github.com/repos/denfry/tessera/releases?per_page=1")
     .then((r) => (r.ok ? r.json() : null))
-    .then((data) => {
+    .then((list) => {
+      const data = list && list[0];
       if (data && data.tag_name) {
         rel.textContent = rel.dataset.release.replace("%s", data.tag_name);
       }

@@ -15,6 +15,8 @@ English | [Русский](README.ru.md)
 [![Minecraft 26.3](https://img.shields.io/badge/Minecraft-26.3-62b47a)](https://minecraft.net/)
 [![Upstream: Folia](https://img.shields.io/badge/upstream-PaperMC%2FFolia-2f81f7)](https://github.com/PaperMC/Folia)
 
+[Website](https://denfry.github.io/tessera/) · [Download](https://github.com/denfry/tessera/releases) · [Patches](PATCHES.md) · [Plugins](PLUGINS.md)
+
 </div>
 
 Tessera is a fork of [Folia](https://github.com/PaperMC/Folia) (regionised multithreading on top of
@@ -22,7 +24,19 @@ Tessera is a fork of [Folia](https://github.com/PaperMC/Folia) (regionised multi
 large survival servers.
 
 > [!NOTE]
-> Early stage. Not production-ready yet: for now this is a stock Folia build.
+> Early stage, still in testing; not production-ready yet. What is planned next is in [BACKLOG.md](BACKLOG.md).
+
+## Highlights
+
+- **Scoreboards** — the scoreboard is thread safe: per-player boards, `Player#setScoreboard`, teams and
+  objectives work from any thread, and so do `/team` and `/scoreboard`.
+- **Teleport events** — `PlayerTeleportEvent`, `EntityTeleportEvent` and portal events fire for async
+  teleports, portals and ender pearls.
+- **Worlds on the fly** — `Bukkit.createWorld` and `unloadWorld` work while the server is running.
+- **Fixes** — ender pearls and stasis chambers, MiniHUD debug subscriptions, dragons away from 0,0,
+  villagers in portals, region ownership in mob AI, autosave of maps and new players, network hardening.
+
+The full list, with upstream issues, is in [PATCHES.md](PATCHES.md).
 
 ## Why Tessera
 
@@ -86,6 +100,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow and patch conventio
 
 Every change Tessera makes on top of Folia is listed in [PATCHES.md](PATCHES.md), with the area it
 touches and a link to the matching upstream issue or PR where there is one.
+
+Third-party plugins checked on Tessera, and how well they work, are listed in [PLUGINS.md](PLUGINS.md).
 
 ## Upstream relationship
 

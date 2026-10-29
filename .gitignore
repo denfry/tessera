@@ -20,3 +20,6 @@ build
 
 # server-specific backlog, not for the public repo
 /BACKLOG.local.md
+
+# Python bytecode from tools/
+__pycache__/
