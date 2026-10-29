@@ -1,0 +1,118 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 13:58:03 +0300
+Subject: [PATCH] Let plugins clean up the world in onDisable
+
+Folia halts the region scheduler before plugins are disabled, and by the
+time onDisable runs the plugin already counts as disabled, so a plugin
+cannot schedule the region or entity task it needs to remove its
+holograms, armour stands or temporary blocks. They stay in the world.
+
+While stopServer runs on the shutdown thread nothing else ticks, so
+execute/run/runDelayed on the region, entity and global schedulers now
+run the task right away on that thread, owning the region of the target
+location or entity. Repeating tasks are not run, and nothing happens for
+unloaded chunks.
+
+Fixes PaperMC/Folia#353
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java
+index 811b8efd155540beac19b70afa1885bff570cd3e..15f31c11faa83e410d969fad58459960c037acd5 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java
++++ b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java
+@@ -36,9 +36,20 @@ public final class FoliaEntityScheduler implements EntityScheduler {
+         };
+     }
+ 
++    // Tessera start - let plugins clean up the world in onDisable
++    private boolean runDuringShutdown(final Runnable run) {
++        final net.minecraft.world.entity.Entity handle = this.entity.getHandleRaw();
++        if (handle.isRemoved() || !(handle.level() instanceof net.minecraft.server.level.ServerLevel level)) {
++            return false;
++        }
++        return io.papermc.paper.threadedregions.RegionShutdownThread.runOwnedDuringShutdown(level, handle.chunkPosition().x(), handle.chunkPosition().z(), run);
++    }
++    // Tessera end - let plugins clean up the world in onDisable
++
+     @Override
+     public boolean execute(final Plugin plugin, final Runnable run, final Runnable retired,
+                            final long delay) {
++        if (this.runDuringShutdown(Objects.requireNonNull(run, "Runnable may not be null"))) return true; // Tessera - let plugins clean up the world in onDisable
+         final Consumer<? extends Entity> runNMS = wrap(plugin, run);
+         final Consumer<? extends Entity> runRetired = retired == null ? null : wrap(plugin, retired);
+ 
+@@ -59,6 +70,13 @@ public final class FoliaEntityScheduler implements EntityScheduler {
+             throw new IllegalArgumentException("Delay ticks may not be <= 0");
+         }
+ 
++        // Tessera start - let plugins clean up the world in onDisable
++        final ScheduledTask shutdownTask = new ShutdownScheduledTask(plugin);
++        if (this.runDuringShutdown(() -> task.accept(shutdownTask))) {
++            return shutdownTask;
++        }
++        // Tessera end - let plugins clean up the world in onDisable
++
+         if (!plugin.isEnabled()) {
+             throw new IllegalPluginAccessException("Plugin attempted to register task while disabled");
+         }
+diff --git a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+index 14ffbcb66006878eacf310547dad53718f8308eb..b2713dbab6bc4c9d863278a03904ed409cd8961e 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
++++ b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+@@ -60,6 +60,13 @@ public class FoliaGlobalRegionScheduler implements GlobalRegionScheduler {
+             throw new IllegalArgumentException("Delay ticks may not be <= 0");
+         }
+ 
++        // Tessera start - let plugins clean up the world in onDisable
++        final ScheduledTask shutdownTask = new ShutdownScheduledTask(plugin);
++        if (io.papermc.paper.threadedregions.RegionShutdownThread.runGlobalDuringShutdown(() -> task.accept(shutdownTask))) {
++            return shutdownTask;
++        }
++        // Tessera end - let plugins clean up the world in onDisable
++
+         if (!plugin.isEnabled()) {
+             throw new IllegalPluginAccessException("Plugin attempted to register task while disabled");
+         }
+diff --git a/src/main/java/io/papermc/paper/threadedregions/scheduler/ShutdownScheduledTask.java b/src/main/java/io/papermc/paper/threadedregions/scheduler/ShutdownScheduledTask.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..65e72ef4ef67396365185f57f773af26b10ef28b
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/threadedregions/scheduler/ShutdownScheduledTask.java
+@@ -0,0 +1,37 @@
++package io.papermc.paper.threadedregions.scheduler;
++
++import org.bukkit.plugin.Plugin;
++import org.jetbrains.annotations.NotNull;
++
++// Tessera - let plugins clean up the world in onDisable
++/**
++ * Handle for a task that was run immediately while the server shut down.
++ */
++final class ShutdownScheduledTask implements ScheduledTask {
++
++    private final Plugin plugin;
++
++    ShutdownScheduledTask(final Plugin plugin) {
++        this.plugin = plugin;
++    }
++
++    @Override
++    public @NotNull Plugin getOwningPlugin() {
++        return this.plugin;
++    }
++
++    @Override
++    public boolean isRepeatingTask() {
++        return false;
++    }
++
++    @Override
++    public @NotNull CancelledState cancel() {
++        return CancelledState.ALREADY_EXECUTED;
++    }
++
++    @Override
++    public @NotNull ExecutionState getExecutionState() {
++        return ExecutionState.FINISHED;
++    }
++}

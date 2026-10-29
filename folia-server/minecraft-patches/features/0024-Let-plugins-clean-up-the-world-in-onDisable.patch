@@ -1,0 +1,114 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 13:58:03 +0300
+Subject: [PATCH] Let plugins clean up the world in onDisable
+
+Folia halts the region scheduler before plugins are disabled, and by the
+time onDisable runs the plugin already counts as disabled, so a plugin
+cannot schedule the region or entity task it needs to remove its
+holograms, armour stands or temporary blocks. They stay in the world.
+
+While stopServer runs on the shutdown thread nothing else ticks, so
+execute/run/runDelayed on the region, entity and global schedulers now
+run the task right away on that thread, owning the region of the target
+location or entity. Repeating tasks are not run, and nothing happens for
+unloaded chunks.
+
+Fixes PaperMC/Folia#353
+
+diff --git a/io/papermc/paper/threadedregions/RegionShutdownThread.java b/io/papermc/paper/threadedregions/RegionShutdownThread.java
+index 2f32561883e97c89215d48aca88c25d1567e9038..f7755bd21513bed2725959e37096e26ad32003c3 100644
+--- a/io/papermc/paper/threadedregions/RegionShutdownThread.java
++++ b/io/papermc/paper/threadedregions/RegionShutdownThread.java
+@@ -34,6 +34,53 @@ public final class RegionShutdownThread extends ca.spottedleaf.moonrise.common.u
+     }
+     // Tessera end - chat during shutdown
+ 
++    // Tessera start - let plugins clean up the world in onDisable
++    // Plugins are disabled after the region scheduler has halted, so tasks they queue in onDisable would never run
++    // (and the plugin already counts as disabled). While stopServer runs nothing else ticks, so the schedulers run
++    // one-shot tasks right away on this thread, owning the target region. Repeating tasks are not run.
++    private static final int MAX_INLINE_TASK_DEPTH = 16;
++    private boolean runPluginTasksInline;
++    private int inlineTaskDepth;
++
++    public static boolean runOwnedDuringShutdown(final ServerLevel world, final int chunkX, final int chunkZ, final Runnable task) {
++        if (!(Thread.currentThread() instanceof RegionShutdownThread thread) || !thread.runPluginTasksInline || thread.inlineTaskDepth >= MAX_INLINE_TASK_DEPTH) {
++            return false;
++        }
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
++        if (region == null) {
++            // chunk is not loaded, nothing to clean up there
++            return false;
++        }
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> previous = thread.shuttingDown;
++        thread.shuttingDown = region;
++        ++thread.inlineTaskDepth;
++        try {
++            task.run();
++        } catch (final Throwable thr) {
++            LOGGER.error("Failed to run task during shutdown at chunk " + chunkX + ", " + chunkZ + " in world '" + world.getWorld().getName() + "'", thr);
++        } finally {
++            --thread.inlineTaskDepth;
++            thread.shuttingDown = previous;
++        }
++        return true;
++    }
++
++    public static boolean runGlobalDuringShutdown(final Runnable task) {
++        if (!(Thread.currentThread() instanceof RegionShutdownThread thread) || !thread.runPluginTasksInline || thread.inlineTaskDepth >= MAX_INLINE_TASK_DEPTH) {
++            return false;
++        }
++        ++thread.inlineTaskDepth;
++        try {
++            task.run();
++        } catch (final Throwable thr) {
++            LOGGER.error("Failed to run global task during shutdown", thr);
++        } finally {
++            --thread.inlineTaskDepth;
++        }
++        return true;
++    }
++    // Tessera end - let plugins clean up the world in onDisable
++
+     static ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> getRegion() {
+         final Thread currentThread = Thread.currentThread();
+         if (currentThread instanceof RegionShutdownThread shutdownThread) {
+@@ -168,7 +215,10 @@ public final class RegionShutdownThread extends ca.spottedleaf.moonrise.common.u
+             TickRegions.getScheduler().dumpAliveThreadTraces("Did not shut down in time");
+         }
+ 
++        this.runPluginTasksInline = true; // Tessera - let plugins clean up the world in onDisable
++        try { // Tessera - let plugins clean up the world in onDisable
+         MinecraftServer.getServer().stopServer(); // stop part 1: most logic, kicking players, plugins, etc
++        } finally { this.runPluginTasksInline = false; } // Tessera - let plugins clean up the world in onDisable
+         // halt all chunk systems first so that any in-progress chunk generation stops
+         LOGGER.info("Halting chunk systems...");
+         for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
+diff --git a/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java b/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
+index 84fa22ac06f1c2533874e1677f4bbd899288c4d6..a82640656a554982f1ba80daf0799289d4126119 100644
+--- a/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
+@@ -65,6 +65,8 @@ public final class FoliaRegionScheduler implements RegionScheduler {
+         Objects.requireNonNull(world, "World may not be null");
+         Objects.requireNonNull(run, "Runnable may not be null");
+ 
++        if (io.papermc.paper.threadedregions.RegionShutdownThread.runOwnedDuringShutdown(((CraftWorld) world).getHandle(), chunkX, chunkZ, run)) return; // Tessera - let plugins clean up the world in onDisable
++
+         RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
+             ((CraftWorld) world).getHandle(), chunkX, chunkZ, wrap(plugin, world, chunkX, chunkZ, run)
+         );
+@@ -85,6 +87,13 @@ public final class FoliaRegionScheduler implements RegionScheduler {
+             throw new IllegalArgumentException("Delay ticks may not be <= 0");
+         }
+ 
++        // Tessera start - let plugins clean up the world in onDisable
++        final ScheduledTask shutdownTask = new ShutdownScheduledTask(plugin);
++        if (io.papermc.paper.threadedregions.RegionShutdownThread.runOwnedDuringShutdown(((CraftWorld) world).getHandle(), chunkX, chunkZ, () -> task.accept(shutdownTask))) {
++            return shutdownTask;
++        }
++        // Tessera end - let plugins clean up the world in onDisable
++
+         if (!plugin.isEnabled()) {
+             throw new IllegalPluginAccessException("Plugin attempted to register task while disabled");
+         }
