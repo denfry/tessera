@@ -1,5 +1,5 @@
 name: Behavior Bug
-description: Report behavior related issues, where Folia does not work like vanilla. Paper and Bukkit plugins are not guaranteed to work on Folia. Do not submit bug reports for plugin issues here.
+description: Report behavior related issues, where Tessera does not work like vanilla. Paper and Bukkit plugins are not guaranteed to work on Tessera. Do not submit bug reports for plugin issues here.
 labels: [ "status: needs triage", "type: bug" ]
 body:
   - type: textarea
@@ -34,20 +34,18 @@ body:
 
   - type: textarea
     attributes:
-      label: Folia version
+      label: Tessera version
       description: |
         Run `/version` on your server and **paste** the full, unmodified output here.
         "latest" is *not* a version; we require the output of `/version` so we can adequately track down the issue.
         Additionally, do NOT provide a screenshot, you MUST paste the entire output.
         <details>
-        <summary>Example</summary>
+        <summary>Example (exact format may differ)</summary>
 
         ```
         > version
         [10:00:11 INFO]: Checking version, please wait...
-        [10:00:12 INFO]: This server is running Folia version git-Folia-"5b74945" (MC: 1.19.4) (Implementing API version 1.19.4-R0.1-SNAPSHOT) (Git: 5b74945)
-        You are running the latest version
-        Previous version: git-Paper-481 (MC: 1.19.4)
+        [10:00:12 INFO]: This server is running Tessera version 26.3-DEV-main@6c3e37e (MC: 26.3) (Implementing API version 26.3-R0.1-SNAPSHOT)
         ```
 
         </details>
@@ -68,9 +66,11 @@ body:
       value: |
         Before submitting this issue, please ensure the following:
 
-        1. You are running the latest version of Folia from [our downloads page](https://papermc.io/downloads).
+        1. You are running the latest Tessera build from [Releases](https://github.com/denfry/tessera/releases).
         2. You searched for and ensured there isn't already an open issue regarding this.
-        3. Your version of Minecraft is supported by Folia.
+        3. Your version of Minecraft is supported by Tessera (currently 26.3).
+        4. The bug does not happen on stock [Folia](https://github.com/PaperMC/Folia). If it does, report it
+           [upstream](https://github.com/PaperMC/Folia/issues) instead.
 
-        If you think you have a bug but are not sure, feel free to ask the `#folia-help` channel of our
-        [Discord](https://discord.gg/papermc).
+        **Dupes and exploits must not be reported here.** Use a
+        [private security advisory](https://github.com/denfry/tessera/security/advisories/new).

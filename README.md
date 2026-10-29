@@ -1,11 +1,35 @@
-Tessera
-=======
+<div align="center">
 
-Fork of [Folia](https://github.com/PaperMC/Folia) (regionised multithreading on top of
-[Paper](https://github.com/PaperMC/Paper)) with bug fixes, performance work and a few
-features for large survival servers. Built for the [Politernal](https://politernal.ru) network.
+<img src=".github/assets/tessera-logo.svg" alt="Tessera logo" width="112" height="112">
 
+# Tessera
+
+**A Folia fork with fixes and performance work for large survival servers.**
+
+English | [Русский](README.ru.md)
+
+[![Build](https://img.shields.io/github/actions/workflow/status/denfry/tessera/release.yml?branch=main&label=build)](https://github.com/denfry/tessera/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/denfry/tessera?include_prereleases&sort=semver)](https://github.com/denfry/tessera/releases)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](PATCHES-LICENSE)
+[![Java 25](https://img.shields.io/badge/Java-25-orange)](https://adoptium.net/)
+[![Minecraft 26.3](https://img.shields.io/badge/Minecraft-26.3-62b47a)](https://minecraft.net/)
+[![Upstream: Folia](https://img.shields.io/badge/upstream-PaperMC%2FFolia-2f81f7)](https://github.com/PaperMC/Folia)
+
+</div>
+
+Tessera is a fork of [Folia](https://github.com/PaperMC/Folia) (regionised multithreading on top of
+[Paper](https://github.com/PaperMC/Paper)) with bug fixes, performance work and a few features for
+large survival servers. It is built for the [Politernal](https://politernal.ru) network.
+
+> [!NOTE]
 > Early stage. Not production-ready yet: for now this is a stock Folia build.
+
+## Why Tessera
+
+Folia splits the world into independently ticked regions, which lets a single server use many cores.
+Upstream moves carefully, and some fixes that matter on a busy survival server take time to land.
+Tessera carries those changes as small, documented patches on top of Folia, so each one can be
+reviewed, dropped or sent upstream on its own.
 
 ## Goals
 
@@ -20,14 +44,28 @@ Tessera runs only plugins that declare `folia-supported: true`. Paper's API alre
 Folia schedulers (`getRegionScheduler()`, `getGlobalRegionScheduler()`, `getAsyncScheduler()`,
 `Entity#getScheduler()`), so a plugin written against them runs unchanged on Paper, Leaf and Tessera.
 
+## Download
+
+Builds are published on the [Releases](https://github.com/denfry/tessera/releases) page. Every push
+to `main` is also built by the [Release workflow](https://github.com/denfry/tessera/actions/workflows/release.yml);
+the paperclip jar is attached to each run as an artifact.
+
+Run it like any Paper server jar (Java 25 required):
+
+```bash
+java -Xms4G -Xmx4G -jar server.jar --nogui   # server.jar = the downloaded *-paperclip-*.jar
+```
+
 ## Building
 
 Requires Git and JDK 25 (Gradle downloads one if missing).
 
 ```bash
 ./gradlew applyAllPatches
-./gradlew createPaperclipJar   # separate run: the task exists only after patching; folia-server/build/libs/*-paperclip-*.jar
+./gradlew createPaperclipJar   # separate run: the task exists only after patching
 ```
+
+The jar ends up in `folia-server/build/libs/*-paperclip-*.jar`.
 
 ## Working on patches
 
@@ -38,8 +76,22 @@ Layout is inherited from Folia so upstream merges stay cheap:
 - `folia-api/paper-patches/` — patches to the API.
 
 Tessera patches start at `1000-` so they never collide with upstream numbering. Workflow:
-edit sources under `folia-server/src/minecraft` or `paper-server`, commit there, then run
-`./gradlew rebuildAllServerPatches` (see `rb.sh`).
+edit sources under `folia-server/src/minecraft` or `paper-server`, commit there, then rebuild the
+patch files with `./rb.sh` (`rb.bat` on Windows).
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow and patch conventions.
+
+## Tessera patches
+
+Every change Tessera makes on top of Folia is listed in [PATCHES.md](PATCHES.md), with the area it
+touches and a link to the matching upstream issue or PR where there is one.
+
+## Upstream relationship
+
+Tessera tracks [PaperMC/Folia](https://github.com/PaperMC/Folia) and merges its version branches
+regularly. Almost all of the work in this repository belongs to the Folia and Paper teams, and in
+particular to [Spottedleaf](https://github.com/Spottedleaf), who designed and wrote Folia's region
+threading. If a bug reproduces on stock Folia, please report it [upstream](https://github.com/PaperMC/Folia/issues).
 
 Updating upstream:
 
@@ -48,6 +100,13 @@ git fetch upstream
 git merge upstream/ver/<version>
 ./gradlew applyAllPatches   # fix conflicts, then rebuild patches
 ```
+
+## Reporting issues
+
+- Bugs, crashes and performance problems: [open an issue](https://github.com/denfry/tessera/issues/new/choose)
+  and include the full `/version` output.
+- Bugs that also happen on stock Folia: report them to [PaperMC/Folia](https://github.com/PaperMC/Folia/issues).
+- Dupes, crash exploits and other security problems: report privately, see [SECURITY.md](SECURITY.md).
 
 ## License
 

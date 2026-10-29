@@ -1,10 +1,11 @@
 blank_issues_enabled: false
 contact_links:
-  - name: PaperMC Discord
-    url: https://discord.gg/papermc
-    about: If you are having minor issues, come ask us on our Discord server!
-  - name: Exploit Report
-    url: https://discord.gg/papermc
-    about: |
-      Due to GitHub not currently allowing private issues, exploit reports are currently handled via our Discord.
-      To report an exploit, see the #paper-exploit-report channel.
+  - name: Security vulnerability or exploit
+    url: https://github.com/denfry/tessera/security/advisories/new
+    about: Report dupes, crash exploits and other security problems privately. Do not open a public issue for them.
+  - name: Bug in upstream Folia
+    url: https://github.com/PaperMC/Folia/issues
+    about: If the problem also happens on stock Folia, report it to PaperMC/Folia instead.
+  - name: Politernal
+    url: https://politernal.ru
+    about: The network Tessera is built for.

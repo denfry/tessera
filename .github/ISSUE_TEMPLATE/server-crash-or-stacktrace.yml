@@ -34,20 +34,18 @@ body:
 
   - type: textarea
     attributes:
-      label: Folia version
+      label: Tessera version
       description: |
         Run `/version` on your server and **paste** the full, unmodified output here.
         "latest" is *not* a version; we require the output of `/version` so we can adequately track down the issue.
         Additionally, do NOT provide a screenshot, you MUST paste the entire output.
         <details>
-        <summary>Example</summary>
+        <summary>Example (exact format may differ)</summary>
 
         ```
         > version
         [10:00:11 INFO]: Checking version, please wait...
-        [10:00:12 INFO]: This server is running Folia version git-Folia-"5b74945" (MC: 1.19.4) (Implementing API version 1.19.4-R0.1-SNAPSHOT) (Git: 5b74945)
-        You are running the latest version
-        Previous version: git-Paper-481 (MC: 1.19.4)
+        [10:00:12 INFO]: This server is running Tessera version 26.3-DEV-main@6c3e37e (MC: 26.3) (Implementing API version 26.3-R0.1-SNAPSHOT)
         ```
         
         </details>
@@ -68,9 +66,11 @@ body:
       value: |
         Before submitting this issue, please ensure the following:
 
-        1. You are running the latest version of Folia from [our downloads page](https://papermc.io/downloads).
-        2. Your version of Minecraft is supported by Folia.
+        1. You are running the latest Tessera build from [Releases](https://github.com/denfry/tessera/releases).
+        2. Your version of Minecraft is supported by Tessera (currently 26.3).
+        3. The crash does not happen on stock [Folia](https://github.com/PaperMC/Folia). If it does, report it upstream.
 
-        If your server crash log contains `DO NOT REPORT THIS TO FOLIA`, please ask in our
-        [Discord](https://discord.gg/papermc) before opening this issue. These messages are informing you of server
-        lag and providing debug information.
+        If your log contains `DO NOT REPORT THIS TO FOLIA`, it is a watchdog lag report rather than a crash:
+        open a Performance Problem issue with a spark profile instead.
+        Crash exploits must be reported through a
+        [private security advisory](https://github.com/denfry/tessera/security/advisories/new).
