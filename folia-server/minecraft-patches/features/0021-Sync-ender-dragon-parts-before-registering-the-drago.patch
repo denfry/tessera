@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 13:29:22 +0300
+Subject: [PATCH] Sync ender dragon parts before registering the dragon
+
+Dragon parts are created at 0,0,0 and only moved on the first dragon
+tick. On Folia the entity lookup registers them immediately, so parts of
+a dragon spawned or moved through a portal far from spawn end up in the
+region that owns chunk 0,0, which breaks multipart tracking and makes
+/summon ender_dragon in the overworld fail.
+
+Move the parts to the dragon before it is registered and after it is
+copied into another dimension.
+
+Fixes PaperMC/Folia#427
+Based on PaperMC/Folia#504 (itarqos5)
+
+diff --git a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java
+index aa53138b3670a8337b639472a6ab5ce46702ff76..766059bc6195ba27a09a6deeb4caed21621835c3 100644
+--- a/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java
++++ b/ca/spottedleaf/moonrise/patches/chunk_system/level/entity/server/ServerEntityLookup.java
+@@ -86,6 +86,11 @@ public final class ServerEntityLookup extends EntityLookup {
+ 
+     @Override
+     protected void addEntityCallback(final Entity entity) {
++        // Tessera start - dragon parts start at 0,0,0 and would be registered into the wrong region
++        if (entity instanceof net.minecraft.world.entity.boss.enderdragon.EnderDragon dragon) {
++            dragon.syncPartPositions();
++        }
++        // Tessera end - dragon parts start at 0,0,0 and would be registered into the wrong region
+         this.world.getCurrentWorldData().addEntity(entity); // Folia - region threading
+         if (entity instanceof ServerPlayer player) {
+             ((ChunkSystemServerLevel)this.serverWorld).moonrise$getNearbyPlayers().addPlayer(player);
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 5a364ca0180c9e1d2285e5645370009f5986c7f7..5bd6f844da26132341b263524723ae9cff89e877 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4555,6 +4555,11 @@ public abstract class Entity
+         Entity copy = this.getType().create(destination, EntitySpawnReason.DIMENSION_TRAVEL);
+         copy.restoreFrom(this);
+         copy.transform(pos, yaw, pitch, velocity);
++        // Tessera start - dragon parts start at 0,0,0 and would be registered into the wrong region
++        if (copy instanceof net.minecraft.world.entity.boss.enderdragon.EnderDragon dragon) {
++            dragon.syncPartPositions();
++        }
++        // Tessera end - dragon parts start at 0,0,0 and would be registered into the wrong region
+         // vanilla code used to call remove _after_ copying, and some stuff is required to be after copy - so add hook here
+         // for example, clearing of inventory after switching dimensions
+         this.postRemoveAfterChangingDimensions();
+diff --git a/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java b/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
+index f852126b179dc0c5dab3dbd22d3bfb8b73a5dba8..d9c22dfaa520c82409536473c76ef011535ecf51 100644
+--- a/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
++++ b/net/minecraft/world/entity/boss/enderdragon/EnderDragon.java
+@@ -1017,4 +1017,12 @@ public class EnderDragon extends Mob implements Enemy {
+         return 500;
+     }
+     // Paper end - init expToDrop for already dying spawned dragon
++
++    // Tessera start - dragon parts start at 0,0,0 and would be registered into the wrong region
++    public void syncPartPositions() {
++        for (final EnderDragonPart part : this.getSubEntities()) {
++            this.tickPart(part, 0.0, 0.0, 0.0);
++        }
++    }
++    // Tessera end - dragon parts start at 0,0,0 and would be registered into the wrong region
+ }
