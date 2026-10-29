@@ -17,3 +17,6 @@ build
 /folia-checkstyle/build.gradle.kts
 
 .idea/
+
+# server-specific backlog, not for the public repo
+/BACKLOG.local.md
