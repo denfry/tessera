@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 15:15:37 +0300
+Subject: [PATCH] Document teleport event threading
+
+PlayerTeleportEvent and EntityTeleportEvent are called on the region
+thread that owns the entity, also for teleports that cross regions or
+worlds. Document it, and how portal teleports report their target.
+
+diff --git a/src/main/java/org/bukkit/event/entity/EntityTeleportEvent.java b/src/main/java/org/bukkit/event/entity/EntityTeleportEvent.java
+index e27cd3a6f4bc7bff642512b6ba442e9062e5f717..21e717da3bf90a245907f768c2a17b20ea957a4c 100644
+--- a/src/main/java/org/bukkit/event/entity/EntityTeleportEvent.java
++++ b/src/main/java/org/bukkit/event/entity/EntityTeleportEvent.java
+@@ -13,6 +13,11 @@ import org.jetbrains.annotations.Nullable;
+  * <br>
+  * This may be as a result of natural causes (Enderman, Shulker), pathfinding
+  * (Wolf), or commands (/teleport).
++ * <p>
++ * Tessera: the event is called on the region thread that owns the entity, before the teleport starts, also when the
++ * teleport crosses regions or worlds ({@code teleportAsync}, commands, ender pearls, portals). The target may be
++ * changed to any loaded world. For portals the exit portal is not known yet: {@link #getTo()} is the approximate exit,
++ * and changing it teleports the entity exactly there without a portal search.
+  */
+ public class EntityTeleportEvent extends EntityEvent implements Cancellable {
+ 
+diff --git a/src/main/java/org/bukkit/event/player/PlayerTeleportEvent.java b/src/main/java/org/bukkit/event/player/PlayerTeleportEvent.java
+index cb9c3ecb82492297604556f9b49e5543f218f38d..6dd9e45fd9ee349436d2d9e365bfe09f8716d9c9 100644
+--- a/src/main/java/org/bukkit/event/player/PlayerTeleportEvent.java
++++ b/src/main/java/org/bukkit/event/player/PlayerTeleportEvent.java
+@@ -14,6 +14,11 @@ import java.util.Set;
+ 
+ /**
+  * Holds information for player teleport events
++ * <p>
++ * Tessera: the event is called on the region thread that owns the entity, before the teleport starts, also when the
++ * teleport crosses regions or worlds ({@code teleportAsync}, commands, ender pearls, portals). The target may be
++ * changed to any loaded world. For portals the exit portal is not known yet: {@link #getTo()} is the approximate exit,
++ * and changing it teleports the entity exactly there without a portal search.
+  */
+ @NullMarked
+ public class PlayerTeleportEvent extends PlayerMoveEvent {

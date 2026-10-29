@@ -1,0 +1,338 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 15:15:36 +0300
+Subject: [PATCH] Call teleport and portal events for async teleports
+
+teleportAsync and the async portal logic never called
+PlayerTeleportEvent / EntityTeleportEvent, and portals skipped
+PlayerPortalEvent / EntityPortalEvent and EntityPortalReadyEvent.
+Plugins that guard regions, keep /back history or check teleports
+did not see ender pearls, portals, /tp or plugin teleports at all.
+
+The events are now called on the origin region thread before the
+entity is detached. Cancelling aborts the teleport and setTo changes
+the target, including a different world. For portals the exit portal
+is still unknown at that point, so the teleport event carries the
+approximate exit; changing it teleports exactly there without a
+portal search. The portal event result (target, search and creation
+radius, canCreatePortal) drives the async portal search. Callers that
+already fired the event or perform internal corrections pass the new
+TELEPORT_FLAG_NO_EVENT.
+
+Fixes PaperMC/Folia#490
+Fixes PaperMC/Folia#330
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 0fef963712fef8ed3aeb58296caaa1df69fa5ef3..68a42a5ae1d8949c48df73ec588c5a407a0c43ad 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4406,6 +4406,59 @@ public abstract class Entity
+      * to teleport if and only if dismounting would result in the teleport being allowed.
+      */
+     public static final long TELEPORT_FLAG_UNMOUNT = 1L << 2;
++    // Tessera start - teleport events
++    /**
++     * This flag skips the {@link org.bukkit.event.player.PlayerTeleportEvent} / {@link org.bukkit.event.entity.EntityTeleportEvent}
++     * call, for callers that have already fired the event or perform an internal correction.
++     */
++    public static final long TELEPORT_FLAG_NO_EVENT = 1L << 3;
++
++    private static final org.bukkit.Location TELEPORT_EVENT_UNCHANGED = new org.bukkit.Location(null, 0.0, 0.0, 0.0);
++
++    /**
++     * Fires the teleport event for this entity on the current (origin) region thread.
++     *
++     * @return {@code null} if the teleport was cancelled, {@link #TELEPORT_EVENT_UNCHANGED} if the target was not changed,
++     *         otherwise the new target
++     */
++    private org.bukkit.@Nullable Location callTeleportEvent(ServerLevel destination, Vec3 pos, Float yaw, Float pitch,
++                                                            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) {
++        org.bukkit.Location to = org.bukkit.craftbukkit.util.CraftLocation.toBukkit(
++            pos, destination, yaw == null ? this.getYRot() : yaw.floatValue(), pitch == null ? this.getXRot() : pitch.floatValue()
++        );
++        org.bukkit.Location from = this.getBukkitEntity().getLocation();
++        net.minecraft.world.level.block.entity.TheEndGatewayBlockEntity gateway = null;
++        if (cause == org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.END_GATEWAY && this.portalProcess != null
++            && this.portalProcess.isSamePortal((net.minecraft.world.level.block.EndGatewayBlock) Blocks.END_GATEWAY)
++            && this.level.getBlockEntity(this.portalProcess.getEntryPosition()) instanceof net.minecraft.world.level.block.entity.TheEndGatewayBlockEntity found) {
++            gateway = found;
++        }
++
++        org.bukkit.Location newTo;
++        if (this instanceof ServerPlayer player) {
++            org.bukkit.event.player.PlayerTeleportEvent event = gateway != null
++                ? new com.destroystokyo.paper.event.player.PlayerTeleportEndGatewayEvent(player.getBukkitEntity(), from, to.clone(), new org.bukkit.craftbukkit.block.CraftEndGateway(this.level.getWorld(), gateway, true))
++                : new org.bukkit.event.player.PlayerTeleportEvent(player.getBukkitEntity(), from, to.clone(), cause);
++            if (!event.callEvent()) {
++                return null;
++            }
++            newTo = event.getTo();
++        } else {
++            org.bukkit.event.entity.EntityTeleportEvent event = gateway != null
++                ? new com.destroystokyo.paper.event.entity.EntityTeleportEndGatewayEvent(this.getBukkitEntity(), from, to.clone(), new org.bukkit.craftbukkit.block.CraftEndGateway(this.level.getWorld(), gateway, true))
++                : new org.bukkit.event.entity.EntityTeleportEvent(this.getBukkitEntity(), from, to.clone());
++            if (!event.callEvent() || event.getTo() == null) {
++                return null;
++            }
++            newTo = event.getTo();
++        }
++
++        if (newTo.getWorld() == null || this.isRemoved()) {
++            return null;
++        }
++        return newTo.equals(to) ? TELEPORT_EVENT_UNCHANGED : newTo.clone();
++    }
++    // Tessera end - teleport events
+ 
+     protected void placeSingleSync(ServerLevel originWorld, ServerLevel destination, EntityTreeNode treeNode, long teleportFlags) {
+         destination.addDuringTeleport(this);
+@@ -4613,7 +4666,28 @@ public abstract class Entity
+             }
+         }
+ 
+-        // TODO any events that can modify go HERE
++        // Tessera start - teleport events
++        if ((teleportFlags & TELEPORT_FLAG_NO_EVENT) == 0L) {
++            org.bukkit.Location newTo = this.callTeleportEvent(destination, pos, yaw, pitch, cause);
++            if (newTo == null) {
++                return false;
++            }
++            if (newTo != TELEPORT_EVENT_UNCHANGED) {
++                destination = ((org.bukkit.craftbukkit.CraftWorld) newTo.getWorld()).getHandle();
++                pos = org.bukkit.craftbukkit.util.CraftLocation.toVec3(newTo);
++                yaw = Float.valueOf(newTo.getYaw());
++                pitch = Float.valueOf(newTo.getPitch());
++                velocity = Vec3.ZERO;
++                if (destination.tesseraUnloading || !ServerLevel.isInSpawnableBounds(BlockPos.containing(pos))) {
++                    return false;
++                }
++            }
++            // a listener may have moved or mounted the entity
++            if (!this.canTeleportAsync() || this.isPassenger() || (this.isVehicle() && (teleportFlags & TELEPORT_FLAG_TELEPORT_PASSENGERS) == 0L)) {
++                return false;
++            }
++        }
++        // Tessera end - teleport events
+ 
+         // check for same region
+         if (destination == this.level()
+@@ -4717,6 +4791,7 @@ public abstract class Entity
+     // If we have to worry about whether the entity may not teleport,
+     // we need to first search, then report back, ...
+     protected void findOrCreatePortalAsync(ServerLevel origin, BlockPos originPortal, ServerLevel destination, PortalType type,
++                                           PortalTarget target, // Tessera - portal events
+                                            ca.spottedleaf.concurrentutil.completable.CallbackCompletable<TeleportTransition> portalInfoCompletable) {
+         switch (type) {
+             // end portal logic is quite simple, the spawn in the end is fixed and when returning to the overworld
+@@ -4790,16 +4865,14 @@ public abstract class Entity
+                             }
+                         );
+ 
+-                boolean destinationIsNether = destination.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER;
+-
+-                int portalSearchRadius = origin.paperConfig().environment.portalSearchVanillaDimensionScaling && destinationIsNether ?
+-                    (int)(destination.paperConfig().environment.portalSearchRadius / destination.dimensionType().coordinateScale()) :
+-                    destination.paperConfig().environment.portalSearchRadius;
+-                int portalCreateRadius = destination.paperConfig().environment.portalCreateRadius;
++                // Tessera start - portal events - the search center and radii come from PlayerPortalEvent / EntityPortalEvent
++                int portalSearchRadius = target.searchRadius();
++                int portalCreateRadius = target.createRadius();
++                boolean canCreatePortal = target.canCreatePortal();
+ 
+                 WorldBorder destinationBorder = destination.getWorldBorder();
+-                double dimensionScale = net.minecraft.world.level.dimension.DimensionType.getTeleportationScale(origin.dimensionType(), destination.dimensionType());
+-                BlockPos targetPos = destination.getWorldBorder().clampToBounds(this.getX() * dimensionScale, this.getY(), this.getZ() * dimensionScale);
++                BlockPos targetPos = target.searchPos();
++                // Tessera end - portal events
+ 
+                 ca.spottedleaf.concurrentutil.completable.CallbackCompletable<BlockUtil.FoundRectangle> portalFound
+                     = new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
+@@ -4843,6 +4916,12 @@ public abstract class Entity
+                             portalFound.complete(portal);
+                             return;
+                         }
++                        // Tessera start - portal events
++                        if (!canCreatePortal) {
++                            portalFound.complete(null);
++                            return;
++                        }
++                        // Tessera end - portal events
+ 
+                         // add tickets so that we can re-search for a portal once the chunks are loaded
+                         Long ticketId = Long.valueOf(CREATE_PORTAL_DOUBLE_CHECK.getAndIncrement());
+@@ -4931,13 +5010,141 @@ public abstract class Entity
+ 
+     }
+ 
+-    protected boolean portalToAsync(ServerLevel destination, BlockPos portalPos, boolean takePassengers,
++    // Tessera start - portal events
++    protected record PortalTarget(ServerLevel destination, BlockPos searchPos, int searchRadius, int createRadius,
++                                  boolean canCreatePortal, org.bukkit.@Nullable Location exact,
++                                  org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause) {}
++
++    /**
++     * Fires the portal events on the origin region thread, before the entity is removed from the world:
++     * {@link io.papermc.paper.event.entity.EntityPortalReadyEvent} (nether only), then
++     * {@link org.bukkit.event.player.PlayerPortalEvent} / {@link org.bukkit.event.entity.EntityPortalEvent}, then
++     * {@link org.bukkit.event.player.PlayerTeleportEvent} / {@link org.bukkit.event.entity.EntityTeleportEvent}.
++     * The exit portal is not known yet, so the teleport event carries the approximate exit position.
++     * If a listener changes the target of the teleport event (or of the end portal event), the entity
++     * is teleported exactly there without a portal search.
++     *
++     * @return {@code null} if a listener cancelled the portal
++     */
++    private @Nullable PortalTarget callPortalEvents(ServerLevel origin, ServerLevel destination, PortalType type) {
++        if (type == PortalType.NETHER) {
++            io.papermc.paper.event.entity.EntityPortalReadyEvent readyEvent = new io.papermc.paper.event.entity.EntityPortalReadyEvent(
++                this.getBukkitEntity(), destination.getWorld(), org.bukkit.PortalType.NETHER
++            );
++            if (!readyEvent.callEvent()) {
++                this.portalProcess = null;
++                return null;
++            }
++            if (readyEvent.getTargetWorld() == null) {
++                return null;
++            }
++            destination = ((org.bukkit.craftbukkit.CraftWorld) readyEvent.getTargetWorld()).getHandle();
++
++            boolean destinationIsNether = destination.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.NETHER;
++            int searchRadius = origin.paperConfig().environment.portalSearchVanillaDimensionScaling && destinationIsNether ?
++                (int)(destination.paperConfig().environment.portalSearchRadius / destination.dimensionType().coordinateScale()) :
++                destination.paperConfig().environment.portalSearchRadius;
++            double dimensionScale = net.minecraft.world.level.dimension.DimensionType.getTeleportationScale(origin.dimensionType(), destination.dimensionType());
++            BlockPos searchPos = destination.getWorldBorder().clampToBounds(this.getX() * dimensionScale, this.getY(), this.getZ() * dimensionScale);
++
++            org.bukkit.craftbukkit.event.PortalEventResult result = org.bukkit.craftbukkit.event.CraftEventFactory.handlePortalEvents(
++                this, org.bukkit.craftbukkit.util.CraftLocation.toBukkit(searchPos, destination), org.bukkit.PortalType.NETHER,
++                searchRadius, destination.paperConfig().environment.portalCreateRadius
++            );
++            if (result == null || this.isRemoved()) {
++                return null;
++            }
++            destination = ((org.bukkit.craftbukkit.CraftWorld) result.to().getWorld()).getHandle();
++            searchPos = destination.getWorldBorder().clampToBounds(result.to().getX(), result.to().getY(), result.to().getZ());
++
++            org.bukkit.Location exact = this.callTeleportEvent(destination, Vec3.atBottomCenterOf(searchPos), null, null, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.NETHER_PORTAL);
++            if (exact == null) {
++                return null;
++            }
++            if (exact == TELEPORT_EVENT_UNCHANGED) {
++                exact = null;
++            } else {
++                destination = ((org.bukkit.craftbukkit.CraftWorld) exact.getWorld()).getHandle();
++            }
++            return new PortalTarget(
++                destination, searchPos, result.searchRadius(), result.createRadius(), result.canCreatePortal(), exact,
++                org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.NETHER_PORTAL
++            );
++        }
++
++        // end portal: the exit is fixed, so the events carry the real target
++        Vec3 exitPos;
++        float exitYaw;
++        if (destination.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END) {
++            exitPos = Vec3.atBottomCenterOf(ServerLevel.END_SPAWN_POINT.below());
++            exitYaw = Direction.WEST.toYRot();
++        } else {
++            exitPos = Vec3.atBottomCenterOf(destination.getRespawnData().pos());
++            exitYaw = this.getYRot();
++        }
++        org.bukkit.Location to = org.bukkit.craftbukkit.util.CraftLocation.toBukkit(exitPos, destination, exitYaw, this.getXRot());
++        org.bukkit.craftbukkit.event.PortalEventResult result = org.bukkit.craftbukkit.event.CraftEventFactory.handlePortalEvents(
++            this, to.clone(), org.bukkit.PortalType.ENDER, 0, 0
++        );
++        if (result == null || this.isRemoved()) {
++            return null;
++        }
++        org.bukkit.Location exact = result.to().equals(to) ? null : result.to().clone();
++        destination = ((org.bukkit.craftbukkit.CraftWorld) result.to().getWorld()).getHandle();
++
++        org.bukkit.Location newTo = this.callTeleportEvent(
++            destination, org.bukkit.craftbukkit.util.CraftLocation.toVec3(result.to()),
++            Float.valueOf(result.to().getYaw()), Float.valueOf(result.to().getPitch()),
++            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.END_PORTAL
++        );
++        if (newTo == null) {
++            return null;
++        }
++        if (newTo != TELEPORT_EVENT_UNCHANGED) {
++            exact = newTo;
++            destination = ((org.bukkit.craftbukkit.CraftWorld) newTo.getWorld()).getHandle();
++        }
++        return new PortalTarget(
++            destination, BlockPos.containing(exitPos), 0, 0, false, exact,
++            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.END_PORTAL
++        );
++    }
++    // Tessera end - portal events
++
++    protected boolean portalToAsync(ServerLevel requestedDestination, BlockPos portalPos, boolean takePassengers, // Tessera - portal events
+                                     PortalType type, java.util.function.Consumer<Entity> teleportComplete) {
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot portal entity async");
+-        if (!((ServerLevel)this.level).isAllowedToEnterPortal(destination)
+-            || !this.canPortalAsync(destination, takePassengers)) {
++        if (!((ServerLevel)this.level).isAllowedToEnterPortal(requestedDestination) // Tessera - portal events
++            || !this.canPortalAsync(requestedDestination, takePassengers)) { // Tessera - portal events
++            return false;
++        }
++
++        // Tessera start - portal events
++        PortalTarget target = this.callPortalEvents((ServerLevel)this.level, requestedDestination, type);
++        if (target == null) {
+             return false;
+         }
++        ServerLevel destination = target.destination();
++        if (destination.tesseraUnloading || !this.canPortalAsync(destination, takePassengers)) {
++            return false;
++        }
++        if (target.exact() != null) {
++            // a listener picked the exact exit, there is no portal to search for
++            this.getSelfAndPassengers().forEach(Entity::setPortalCooldown);
++            org.bukkit.Location exit = target.exact();
++            return this.teleportAsync(
++                destination, org.bukkit.craftbukkit.util.CraftLocation.toVec3(exit),
++                Float.valueOf(exit.getYaw()), Float.valueOf(exit.getPitch()), Vec3.ZERO, target.cause(),
++                Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_NO_EVENT | (takePassengers ? Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS : 0L),
++                (Entity teleported) -> {
++                    TeleportTransition.PLAY_PORTAL_SOUND.onTransition(teleported);
++                    if (teleportComplete != null) {
++                        teleportComplete.accept(teleported);
++                    }
++                }
++            );
++        }
++        // Tessera end - portal events
+ 
+         Vec3 initialPosition = this.position();
+         ChunkPos initialPositionChunk = new ChunkPos(
+@@ -5010,7 +5217,7 @@ public abstract class Entity
+         });
+ 
+ 
+-        passengerTree.root.findOrCreatePortalAsync(originWorld, portalPos, destination, type, portalInfoCompletable);
++        passengerTree.root.findOrCreatePortalAsync(originWorld, portalPos, destination, type, target, portalInfoCompletable); // Tessera - portal events
+ 
+         return true;
+     }
+@@ -5084,7 +5291,7 @@ public abstract class Entity
+ 
+         this.teleportAsync(
+             (ServerLevel)this.level(), this.position, null, null, null,
+-            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN, Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS,
++            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN, Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_TELEPORT_PASSENGERS | Entity.TELEPORT_FLAG_NO_EVENT, // Tessera - teleport events - internal correction
+             null
+         );
+     }
+diff --git a/net/minecraft/world/entity/TamableAnimal.java b/net/minecraft/world/entity/TamableAnimal.java
+index b4fb28dea2f2fc2bbb33e94495eb9b96c5eda4f5..39558d68baa4a00295d6bb2bdb1e5edccd1e15cf 100644
+--- a/net/minecraft/world/entity/TamableAnimal.java
++++ b/net/minecraft/world/entity/TamableAnimal.java
+@@ -301,7 +301,7 @@ public abstract class TamableAnimal extends Animal implements OwnableEntity {
+                         (net.minecraft.server.level.ServerLevel)nmsEntity.level(),
+                         new net.minecraft.world.phys.Vec3(finalTo.getX(), finalTo.getY(), finalTo.getZ()),
+                         Float.valueOf(finalTo.getYaw()), Float.valueOf(finalTo.getPitch()),
+-                        net.minecraft.world.phys.Vec3.ZERO, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN, Entity.TELEPORT_FLAG_LOAD_CHUNK,
++                        net.minecraft.world.phys.Vec3.ZERO, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN, Entity.TELEPORT_FLAG_LOAD_CHUNK | Entity.TELEPORT_FLAG_NO_EVENT, // Tessera - teleport events - EntityTeleportEvent is already fired above
+                         null
+                 );
+             }
