@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tessera — форк Folia</title>
+<meta name="description" content="Tessera — форк Folia с исправлениями и оптимизациями для больших выживальных серверов.">
+<meta property="og:title" content="Tessera">
+<meta property="og:description" content="Форк Folia с исправлениями и оптимизациями для больших выживальных серверов.">
+<meta property="og:type" content="website">
+<link rel="icon" href="../logo.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="en" href="../">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <a class="brand" href="./"><img src="../logo.svg" alt="">Tessera</a>
+  <nav>
+    <a class="opt" href="#run">запуск</a>
+    <a class="opt" href="#build">сборка</a>
+    <a href="https://github.com/denfry/tessera">github</a>
+    <a href="../" hreflang="en">en</a>
+  </nav>
+</header>
+
+<main>
+<div class="hero">
+  <div>
+    <h1>Tessera</h1>
+    <p class="lede">Форк <a href="https://github.com/PaperMC/Folia">Folia</a> для <strong>больших выживальных серверов</strong>.
+      Исправления и оптимизации, которых пока нет в апстриме, — каждое отдельным патчем.</p>
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/denfry/tessera/releases">Скачать</a>
+      <a class="btn" href="https://github.com/denfry/tessera">Исходники</a>
+      <span class="release" data-release="последний: %s">Java 25 · Minecraft 26.3</span>
+    </div>
+  </div>
+  <figure class="regions">
+    <div class="grid" aria-hidden="true"></div>
+    <figcaption>Каждая цветная группа — регион со своим тиком. Янтарный — забитый игроками спавн: он тикает медленнее, остальные его не ждут.</figcaption>
+  </figure>
+</div>
+
+<section>
+  <h2>Состояние</h2>
+  <div class="status">
+    <p>Ранняя стадия, для продакшена пока не готово. Сейчас сборка — это обычная Folia под новым именем;
+      собственные патчи Tessera появляются в <a href="https://github.com/denfry/tessera/blob/main/PATCHES.md">PATCHES.md</a> по мере готовности.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Что это</h2>
+  <div class="cols">
+    <div>
+      <h3>Внутри Folia</h3>
+      <p>Folia делит мир на регионы и тикает их в разных потоках, поэтому один сервер может занять много ядер.
+        Tessera эту модель не трогает и регулярно подтягивает апстрим.</p>
+    </div>
+    <div>
+      <h3>Мелкие отдельные патчи</h3>
+      <p>Каждое изменение — свой патч с номером от <code>1000-</code>, с описанием. Его легко выкинуть или отправить в апстрим.</p>
+    </div>
+    <div>
+      <h3>Что берём</h3>
+      <p>Фиксы дюпов и крашей, ошибки владения регионами, оптимизации, которые не меняют ванильное поведение без опции в конфиге.</p>
+    </div>
+    <div>
+      <h3>Что не берём</h3>
+      <p>Всё, что молча ломает плагины, написанные под Folia API.</p>
+    </div>
+  </div>
+</section>
+
+<section id="run">
+  <h2>Запуск</h2>
+  <p>Возьмите <code>*-paperclip-*.jar</code> из <a href="https://github.com/denfry/tessera/releases">Releases</a>
+    или из последнего запуска <a href="https://github.com/denfry/tessera/actions/workflows/release.yml">Release workflow</a>. Нужна Java 25.</p>
+<pre>java -Xms4G -Xmx4G -jar server.jar --nogui</pre>
+  <p>Загружаются только плагины с <code>folia-supported: true</code>. В Paper API уже есть планировщики Folia
+    (<code>getRegionScheduler()</code>, <code>getGlobalRegionScheduler()</code>,
+    <code>getAsyncScheduler()</code>, <code>Entity#getScheduler()</code>), так что плагин на них
+    работает и на Paper, и на Tessera без изменений.</p>
+</section>
+
+<section id="build">
+  <h2>Сборка</h2>
+  <p>Нужны Git и JDK 25 (если JDK нет, Gradle скачает сам).</p>
+<pre>./gradlew applyAllPatches
+./gradlew createPaperclipJar   <span class="c"># отдельным запуском: задача появляется после патчинга</span></pre>
+  <p>Jar лежит в <code>folia-server/build/libs/</code>.</p>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Папка</th><th>Что патчит</th></tr></thead>
+    <tbody>
+      <tr><td><code>folia-server/minecraft-patches/</code></td><td>исходники Minecraft</td></tr>
+      <tr><td><code>folia-server/paper-patches/</code></td><td>исходники сервера Paper</td></tr>
+      <tr><td><code>folia-api/paper-patches/</code></td><td>Paper API</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="margin-top:16px">Правите исходники в <code>folia-server/src/minecraft</code> или <code>paper-server</code>, коммитите там,
+    потом пересобираете патчи через <code>./rb.sh</code>. Подробнее в
+    <a href="https://github.com/denfry/tessera/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>.</p>
+</section>
+
+<section>
+  <h2>Нашли проблему</h2>
+  <ul class="plain">
+    <li>Баги, краши, лаги: <a href="https://github.com/denfry/tessera/issues/new/choose">откройте issue</a> и приложите полный вывод <code>/version</code>.</li>
+    <li>Воспроизводится и на чистой Folia: пишите в <a href="https://github.com/PaperMC/Folia/issues">PaperMC/Folia</a>.</li>
+    <li>Дюпы и краш-эксплойты: только приватно, см. <a href="https://github.com/denfry/tessera/blob/main/SECURITY.md">SECURITY.md</a>.</li>
+  </ul>
+</section>
+</main>
+
+<footer>
+  <p>Почти весь код здесь — работа команд Folia и Paper, и в первую очередь
+    <a href="https://github.com/Spottedleaf">Spottedleaf</a>, автора региональной многопоточности Folia.</p>
+  <p>Делается для <a href="https://politernal.ru">Politernal</a>. Патчи под GPL-3.0, см.
+    <a href="https://github.com/denfry/tessera/blob/main/PATCHES-LICENSE">PATCHES-LICENSE</a>. Не связано с Mojang и Microsoft.</p>
+</footer>
+
+</div>
+<script src="../site.js" defer></script>
+</body>
+</html>

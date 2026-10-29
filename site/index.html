@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tessera — Folia fork</title>
+<meta name="description" content="Tessera is a Folia fork with bug fixes and performance work for large survival servers.">
+<meta property="og:title" content="Tessera">
+<meta property="og:description" content="A Folia fork with fixes and performance work for large survival servers.">
+<meta property="og:type" content="website">
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="alternate" hreflang="ru" href="ru/">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <a class="brand" href="./"><img src="logo.svg" alt="">Tessera</a>
+  <nav>
+    <a class="opt" href="#run">run</a>
+    <a class="opt" href="#build">build</a>
+    <a href="https://github.com/denfry/tessera">github</a>
+    <a href="ru/" hreflang="ru">ru</a>
+  </nav>
+</header>
+
+<main>
+<div class="hero">
+  <div>
+    <h1>Tessera</h1>
+    <p class="lede">A fork of <a href="https://github.com/PaperMC/Folia">Folia</a> for <strong>large survival servers</strong>.
+      Bug fixes and performance patches that haven't landed upstream yet, each kept as a separate patch.</p>
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/denfry/tessera/releases">Download</a>
+      <a class="btn" href="https://github.com/denfry/tessera">Source</a>
+      <span class="release" data-release="latest: %s">Java 25 · Minecraft 26.3</span>
+    </div>
+  </div>
+  <figure class="regions">
+    <div class="grid" aria-hidden="true"></div>
+    <figcaption>Each coloured group is a region with its own tick. The amber one is a crowded spawn: it runs slower, the others don't wait for it.</figcaption>
+  </figure>
+</div>
+
+<section>
+  <h2>Status</h2>
+  <div class="status">
+    <p>Early stage, not production-ready. Right now the build is stock Folia under a new name;
+      Tessera's own patches are listed in <a href="https://github.com/denfry/tessera/blob/main/PATCHES.md">PATCHES.md</a> as they land.</p>
+  </div>
+</section>
+
+<section>
+  <h2>What it is</h2>
+  <div class="cols">
+    <div>
+      <h3>Folia underneath</h3>
+      <p>Folia splits the world into regions and ticks them on separate threads, so one server can use many cores.
+        Tessera keeps that model as is and merges upstream regularly.</p>
+    </div>
+    <div>
+      <h3>Small, separate patches</h3>
+      <p>Every change is its own patch numbered from <code>1000-</code>, documented, and easy to drop or send upstream.</p>
+    </div>
+    <div>
+      <h3>What goes in</h3>
+      <p>Dupe and crash fixes, region-ownership bugs, optimisations that keep vanilla behaviour unless a config option says otherwise.</p>
+    </div>
+    <div>
+      <h3>What stays out</h3>
+      <p>Anything that silently breaks plugins written for the Folia API.</p>
+    </div>
+  </div>
+</section>
+
+<section id="run">
+  <h2>Run</h2>
+  <p>Grab the <code>*-paperclip-*.jar</code> from <a href="https://github.com/denfry/tessera/releases">Releases</a>
+    or from the latest <a href="https://github.com/denfry/tessera/actions/workflows/release.yml">Release workflow</a> run. Java 25 is required.</p>
+<pre>java -Xms4G -Xmx4G -jar server.jar --nogui</pre>
+  <p>Only plugins that declare <code>folia-supported: true</code> are loaded. Paper's API already has the
+    Folia schedulers (<code>getRegionScheduler()</code>, <code>getGlobalRegionScheduler()</code>,
+    <code>getAsyncScheduler()</code>, <code>Entity#getScheduler()</code>), so a plugin written against them
+    runs unchanged on Paper and Tessera.</p>
+</section>
+
+<section id="build">
+  <h2>Build</h2>
+  <p>Needs Git and JDK 25 (Gradle downloads one if it's missing).</p>
+<pre>./gradlew applyAllPatches
+./gradlew createPaperclipJar   <span class="c"># separate run: the task appears after patching</span></pre>
+  <p>The jar ends up in <code>folia-server/build/libs/</code>.</p>
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Directory</th><th>Patches</th></tr></thead>
+    <tbody>
+      <tr><td><code>folia-server/minecraft-patches/</code></td><td>Minecraft sources</td></tr>
+      <tr><td><code>folia-server/paper-patches/</code></td><td>Paper server sources</td></tr>
+      <tr><td><code>folia-api/paper-patches/</code></td><td>Paper API</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="margin-top:16px">Edit sources under <code>folia-server/src/minecraft</code> or <code>paper-server</code>, commit there,
+    then rebuild patch files with <code>./rb.sh</code>. Details in
+    <a href="https://github.com/denfry/tessera/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>.</p>
+</section>
+
+<section>
+  <h2>Reporting problems</h2>
+  <ul class="plain">
+    <li>Bugs, crashes, lag: <a href="https://github.com/denfry/tessera/issues/new/choose">open an issue</a> with the full <code>/version</code> output.</li>
+    <li>Reproduces on stock Folia too: report it to <a href="https://github.com/PaperMC/Folia/issues">PaperMC/Folia</a>.</li>
+    <li>Dupes and crash exploits: privately, see <a href="https://github.com/denfry/tessera/blob/main/SECURITY.md">SECURITY.md</a>.</li>
+  </ul>
+</section>
+</main>
+
+<footer>
+  <p>Almost all of the code here is the work of the Folia and Paper teams, and of
+    <a href="https://github.com/Spottedleaf">Spottedleaf</a> in particular, who designed Folia's region threading.</p>
+  <p>Built for <a href="https://politernal.ru">Politernal</a>. Patches under GPL-3.0, see
+    <a href="https://github.com/denfry/tessera/blob/main/PATCHES-LICENSE">PATCHES-LICENSE</a>. Not affiliated with Mojang or Microsoft.</p>
+</footer>
+
+</div>
+<script src="site.js" defer></script>
+</body>
+</html>
