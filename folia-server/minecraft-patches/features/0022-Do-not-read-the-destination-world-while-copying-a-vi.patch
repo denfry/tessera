@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 13:30:09 +0300
+Subject: [PATCH] Do not read the destination world while copying a villager
+
+When a villager goes through a portal, Folia builds the copy for the
+destination world on the source world's region thread. Creating and
+restoring the brain updates the schedule activity, which reads the
+destination world state and throws "World mismatch", so the villager is
+lost.
+
+Skip that initial update while the current region belongs to another
+world. The core UpdateActivityFromSchedule behaviour sets the activity on
+the villager's first tick in the new world.
+
+Fixes PaperMC/Folia#431
+Related to PaperMC/Folia#446 (nekoneko2872)
+
+diff --git a/net/minecraft/world/entity/npc/villager/Villager.java b/net/minecraft/world/entity/npc/villager/Villager.java
+index 086334694874fccaf7aad9d6d1dde78cfd961c3c..c9505300a4c7c42ef99713863e9301a9a47f16b3 100644
+--- a/net/minecraft/world/entity/npc/villager/Villager.java
++++ b/net/minecraft/world/entity/npc/villager/Villager.java
+@@ -213,7 +213,13 @@ public class Villager extends AbstractVillager implements VillagerDataHolder, Re
+             brain.setSchedule(EnvironmentAttributes.VILLAGER_ACTIVITY);
+         }
+ 
+-        brain.updateActivityFromSchedule(this.level().environmentAttributes(), this.level().getLevelData().getGameTime(), this.position()); // Folia - region threading - not in the world yet
++        // Tessera start - during an async portal teleport the copy is built on the source world's region, so reading the
++        // destination's environment throws "World mismatch"; the core UpdateActivityFromSchedule behaviour sets it on the next tick
++        final io.papermc.paper.threadedregions.RegionizedWorldData currentWorldData = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegionizedWorldData();
++        if (currentWorldData == null || currentWorldData.world == this.level()) {
++            brain.updateActivityFromSchedule(this.level().environmentAttributes(), this.level().getLevelData().getGameTime(), this.position()); // Folia - region threading - not in the world yet
++        }
++        // Tessera end
+     }
+ 
+     @Override

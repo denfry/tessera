@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 13:31:23 +0300
+Subject: [PATCH] Do not block tick threads on netty during protocol switches
+
+Connection#setupInboundProtocol and #setupOutboundProtocol wait for the
+channel's event loop to apply the new codec. On Folia they are called
+from the global tick thread (finish configuration) and from region
+threads (spawning the player), so a busy or flooded event loop stalls
+the whole global tick or a region until netty gets to the task.
+
+The wait is not needed for correctness: the terminal packet already
+disabled auto-read, and the event loop runs queued writes in order, so
+any later packet is handled with the new codec. Off the event loop,
+attach a listener that logs failures and closes the channel instead of
+waiting.
+
+Also ignore a repeated ServerboundFinishConfigurationPacket once the
+player is being placed, so it cannot schedule a second spawn.
+
+Fixes PaperMC/Folia#454, PaperMC/Folia#520
+
+diff --git a/net/minecraft/network/Connection.java b/net/minecraft/network/Connection.java
+index 2cd70b595e828db9b03ec038dba76007c938b98e..4883e1501c66d1791795e018b281e7560a45ac31 100644
+--- a/net/minecraft/network/Connection.java
++++ b/net/minecraft/network/Connection.java
+@@ -349,6 +349,24 @@ public class Connection extends SimpleChannelInboundHandler<Packet<?>> {
+     }
+ 
+     private static void syncAfterConfigurationChange(final ChannelFuture future) {
++        // Tessera start - do not park region or global tick threads on a netty event loop
++        // The terminal packet already disabled auto-read and the event loop runs queued writes in order, so later packets
++        // still see the new protocol; blocking here only lets a busy or flooded connection stall the calling region.
++        if (!future.channel().eventLoop().inEventLoop()) {
++            future.addListener(result -> {
++                if (result.isSuccess()) {
++                    return;
++                }
++                if (result.cause() instanceof ClosedChannelException) {
++                    LOGGER.info("Connection closed during protocol change");
++                } else {
++                    LOGGER.error("Failed to change protocol", result.cause());
++                    future.channel().close();
++                }
++            });
++            return;
++        }
++        // Tessera end - do not park region or global tick threads on a netty event loop
+         try {
+             future.syncUninterruptibly();
+         } catch (Exception e) {
+diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+index 77c4670868a95dc7b13461dfa67af34b0a3c329a..f8bd01d1e89484d1831ca043a75ecd3b2b0bd45d 100644
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -196,6 +196,11 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
+     @Override
+     public void handleConfigurationFinished(final ServerboundFinishConfigurationPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.server.packetProcessor());
++        // Tessera start - the player is already being placed; a repeated finish packet must not schedule a second spawn
++        if (this.switchToMain != null) {
++            return;
++        }
++        // Tessera end
+         this.finishCurrentTask(JoinWorldTask.TYPE);
+         this.connection.setupOutboundProtocol(GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(this.server.registryAccess())));
+ 

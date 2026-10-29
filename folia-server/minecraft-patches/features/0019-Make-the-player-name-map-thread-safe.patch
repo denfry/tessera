@@ -1,0 +1,24 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 13:28:38 +0300
+Subject: [PATCH] Make the player name map thread-safe
+
+playersByUUID is already a ConcurrentHashMap, but playersByName is still
+a HashMap, while players join and leave on different region threads and
+plugins look players up by name from any region.
+
+Based on PaperMC/Folia#497 (Dueris)
+
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index 82fb4aecffaf4ae97a9c2ab60eca2d67107de0a8..5869785258d2ec7483ed11275f4abc072068e74b 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -134,7 +134,7 @@ public abstract class PlayerList {
+ 
+     // CraftBukkit start
+     private org.bukkit.craftbukkit.CraftServer cserver;
+-    private final Map<String,ServerPlayer> playersByName = new java.util.HashMap<>();
++    private final Map<String,ServerPlayer> playersByName = new java.util.concurrent.ConcurrentHashMap<>(); // Tessera - regions add and remove players concurrently
+     public @Nullable String collideRuleTeamName; // Paper - Configurable player collision
+ 
+     // Folia start - region threading

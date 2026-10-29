@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 13:28:56 +0300
+Subject: [PATCH] Autosave players that were never saved
+
+lastSave starts at LAST_SAVE_ABSENT (Long.MIN_VALUE), and the autosave
+check computes now - lastSave, which overflows to a negative number. A
+player is therefore only autosaved after something else (a manual
+save-all, a world change) saved them once, so a crash loses everything
+done since join.
+
+Based on PaperMC/Folia#459 (Dueris)
+
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index 5869785258d2ec7483ed11275f4abc072068e74b..2bb63bb31788b76c08813803a4fe73688cc4e0de 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -1049,7 +1049,7 @@ public abstract class PlayerList {
+                 continue;
+             }
+             // Folia end - region threading
+-            if (interval == -1 || now - player.lastSave >= timeInterval) { // Folia - region threading
++            if (interval == -1 || player.lastSave == ServerPlayer.LAST_SAVE_ABSENT || now - player.lastSave >= timeInterval) { // Folia - region threading // Tessera - now - Long.MIN_VALUE overflows, so unsaved players were never autosaved
+                 profiler.startTimer(ca.spottedleaf.leafprofiler.LProfilerRegistry.PLAYER_SAVE); try { // Folia - profiler
+                 this.save(player);
+                 } finally { profiler.stopTimer(ca.spottedleaf.leafprofiler.LProfilerRegistry.PLAYER_SAVE); } // Folia - profiler
