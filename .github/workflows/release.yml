@@ -51,7 +51,7 @@ jobs:
           echo "tag=${mc}-build.${BUILD_NUMBER}" >> "$GITHUB_OUTPUT"
 
       - name: Upload jar
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tessera-${{ github.run_number }}
           path: ${{ steps.jar.outputs.name }}
