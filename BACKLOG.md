@@ -42,24 +42,6 @@
 
 ## P0 — блокирует переезд
 
-### T-002 `PlayerTeleportEvent` для всех телепортов — [#490](https://github.com/PaperMC/Folia/issues/490), [#330](https://github.com/PaperMC/Folia/issues/330)
-- **Зачем.** Сейчас событие приходит только для хоруса, слезания с транспорта и выхода из кровати. Для жемчуга, порталов,
-  `teleportAsync`, `/tp` его нет, а на нём держатся плагины защиты регионов (запрет входа), `/back` и античиты.
-  Какие наши плагины от этого зависят — в `BACKLOG.local.md`.
-- **Где.**
-  - `Entity#teleportAsync` и цепочка `placeInAsync` / `transform` (minecraft-patches, Region-Threading-Base);
-  - `ThrownEnderpearl#attemptTeleport`, обработка порталов в `Entity` (async portal path);
-  - `CraftEntity#teleportAsync` (paper-server);
-  - `CraftEventFactory`.
-- **Готово, когда.**
-  - Перед запуском асинхронного телепорта на потоке **исходного** региона вызывается `PlayerTeleportEvent` (для
-    не-игроков — `EntityTeleportEvent`) с правильным `TeleportCause`.
-  - Отмена отменяет телепорт, а `setTo` меняет цель.
-  - Для порталов также вызывается `PlayerPortalEvent` (сейчас он обходится, см. #453).
-  - Документировать: обработчик выполняется на потоке исходного региона, менять цель на другой мир можно.
-- **Проверка.** Тестовый плагин логирует и отменяет события. Бот проходит портал (поставить портал командой и
-  телепортировать бота в рамку), кидает жемчуг, `/tp`. Каждое событие приходит один раз, отмена работает.
-
 ### T-004 Scoreboard API (личные и главный скорборд)
 - **Зачем.** В Folia `Bukkit.getScoreboardManager()` и `Player#setScoreboard` не поддерживаются. Личные скорборды и команды
   нужны плагинам подсветки, ников и табов (наши места — в `BACKLOG.local.md`).
@@ -238,20 +220,24 @@
 ---
 
 
+
 лежат в `BACKLOG.local.md` в корне репозитория. Файл не коммитится (`.gitignore`), потому что репозиторий публичный:
 туда пишутся список плагинов, имена серверов и папок, ветки и пути внутренних модулей. Если файла нет — попросить у denfry.
 
 ---
 
-## P3 — потом
-
-- **T-060** Автоматический мёрж upstream Folia ([#468](https://github.com/PaperMC/Folia/issues/468)): workflow раз в неделю
+еский мёрж upstream Folia ([#468](https://github.com/PaperMC/Folia/issues/468)): workflow раз в неделю
   делает ветку `upstream-sync`, мёржит PaperMC/Folia, прогоняет `applyAllPatches` и сборку и открывает PR.
 - **T-061** Сообщения чанкового API ([#96](https://github.com/PaperMC/Folia/issues/96)): понятные ошибки при вызове
   синхронного API не с того потока (какой поток, какой регион, что использовать вместо).
 - **T-062** Проверка версий для Tessera: `/version` сейчас пишет «Unknown version». Сделать проверку по GitHub Releases
   `denfry/tessera`.
 - **T-063** CI: прогон `tools/joinbot.py` на собранном jar в Actions (сервер, два бота, вход и выход, остановка без ERROR).
+- **T-065** Ранний `stop` из консоли: команда, введённая сразу после `Done`, падает с NPE `CommandSourceStack.getLevel()` is null
+  (`getGameRules()`), сервер не останавливается. Видно при `echo stop | java -jar ...`.
+- **T-066** Края событий телепорта (после T-002): для портала `PlayerTeleportEvent` получает примерный выход (портал ещё не найден);
+  при `canCreatePortal=false` и отсутствии портала сущность ставится в точку поиска, а не остаётся на месте, как в Paper; откат
+  после отменённого `PlayerMoveEvent` идёт через `teleportAsync` и сам вызывает `PlayerTeleportEvent`, его можно отменить.
 - **T-064** Края выгрузки миров (после T-001): сущность или игрок, чей асинхронный телепорт в мир начался до `unloadWorld`, и вход игрока, сохранённого в этом мире, в момент выгрузки. Сейчас `unloadWorld` проверяет только игроков в мире и запрещает новые `teleportAsync` туда. Пока мир сохраняется, глобальный поток ждёт (на тестах 0,1–1,4 с).
 
 ---
@@ -277,3 +263,4 @@
 | Кэш типов целей мобов | #522 | paper 0008 |
 | Брендинг Tessera, GitHub Release на каждую сборку | — | build.gradle.kts.patch, release.yml |
 | Загрузка и выгрузка миров (`createWorld` / `unloadWorld`), T-001 | #134 | 0025 / paper 0010 |
+| `PlayerTeleportEvent` / `EntityTeleportEvent` и события порталов для асинхронных телепортов, T-002 | #490, #330 | 0026 / api 0005 |
