@@ -1,4 +1,5 @@
 """Minimal offline-mode 26.3 client: handshake -> login -> configuration -> play, then idles answering keep-alives."""
+import os
 import socket, struct, sys, time, uuid, zlib
 
 PROTO = 777
@@ -6,6 +7,8 @@ HOST, PORT = '127.0.0.1', int(sys.argv[1])
 NAME = sys.argv[2]
 STAY = float(sys.argv[3])
 SPAM_FINISH = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+# JOINBOT_SCOREBOARD=1: follow team and objective packets like a client and report anything out of order
+CHECK_SCOREBOARD = os.environ.get('JOINBOT_SCOREBOARD') == '1'
 
 
 def varint(n):
@@ -32,6 +35,53 @@ def read_varint_buf(b, i=0):
 def string(s):
     e = s.encode()
     return varint(len(e)) + e
+
+
+def read_string(b, i):
+    n, i = read_varint_buf(b, i)
+    return b[i:i + n].decode('utf-8'), i + n
+
+
+class Scoreboard:
+    def __init__(self):
+        self.teams, self.objectives = set(), set()
+        self.counts = {'team': 0, 'objective': 0, 'score': 0}
+        self.errors = []
+
+    def handle(self, pid, data):
+        if pid == 111:  # set_player_team: name, method (0 add, 1 remove, 2 change, 3 join, 4 leave)
+            name, i = read_string(data, 0)
+            self.counts['team'] += 1
+            self.track(self.teams, 'team', name, data[i], (0,), (1,))
+        elif pid == 108:  # set_objective: name, method (0 add, 1 remove, 2 change)
+            name, i = read_string(data, 0)
+            self.counts['objective'] += 1
+            self.track(self.objectives, 'objective', name, data[i], (0,), (1,))
+        elif pid == 112:  # set_score: owner, objective
+            _, i = read_string(data, 0)
+            objective, _ = read_string(data, i)
+            self.counts['score'] += 1
+            if objective not in self.objectives:
+                self.errors.append('score for unknown objective ' + objective)
+
+    def track(self, known, kind, name, method, adds, removes):
+        if method in adds:
+            if name in known:
+                self.errors.append('%s %s added twice' % (kind, name))
+            known.add(name)
+        elif name not in known:
+            self.errors.append('%s %s changed before it was added (method %d)' % (kind, name, method))
+        elif method in removes:
+            known.discard(name)
+
+    def report(self):
+        print('SCOREBOARD packets %s, teams now %d, objectives now %d, errors %d'
+              % (self.counts, len(self.teams), len(self.objectives), len(self.errors)))
+        for e in self.errors[:20]:
+            print('SCOREBOARD ERROR', e)
+
+
+board = Scoreboard() if CHECK_SCOREBOARD else None
 
 
 class Conn:
@@ -114,6 +164,8 @@ while True:
         elif pid == 45:
             c.send(28, data)
         elif pid == 32:
-            print('PLAY DISCONNECT', data[:300]); sys.exit(1)
+            print('PLAY DISCONNECT', data[:300]); board and board.report(); sys.exit(1)
+        elif board:
+            board.handle(pid, data)
         if joined_at and time.time() - joined_at > STAY:
-            print('stayed %.0fs, leaving' % STAY); sys.exit(0)
+            print('stayed %.0fs, leaving' % STAY); board and board.report(); sys.exit(0)

@@ -1,0 +1,540 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 15:35:06 +0300
+Subject: [PATCH] Make the scoreboard thread safe
+
+Folia shares one scoreboard between all regions but its maps had no
+synchronisation, so the base patch stubbed Entity#getTeam to null,
+dropped the scoreboard sent on join, stopped resetting the scores of
+removed entities and unregistered /scoreboard, /team and /trigger.
+
+Every change now holds the scoreboard monitor, so the packets it sends
+reach each player in the order the changes were made. Objectives,
+scores and teams live in concurrent maps, so entities read them from
+any region without the monitor, and stat criteria and entity removal
+skip the monitor when the board does not track them. A joining player
+is sent its board whole under the monitor and only gets changes after
+that, so each team and objective reaches it once.
+
+Fixes PaperMC/Folia#25
+Based on PaperMC/Folia#519 (lewisgibson)
+
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index 29134b7b3f216c7aabd848a1969ce6dedf516218..f2cf45afc1e898d1afd42460a279c43cc16382b2 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -244,7 +244,7 @@ public class Commands {
+         RotateCommand.register(this.dispatcher);
+         SayCommand.register(this.dispatcher);
+         //ScheduleCommand.register(this.dispatcher); // Folia - region threading
+-        //ScoreboardCommand.register(this.dispatcher, context); // Folia - region threading
++        ScoreboardCommand.register(this.dispatcher, context); // Tessera - thread safe scoreboard
+         SeedCommand.register(this.dispatcher, commandSelection != Commands.CommandSelection.INTEGRATED);
+         VersionCommand.register(this.dispatcher, commandSelection != Commands.CommandSelection.INTEGRATED);
+         SetBlockCommand.register(this.dispatcher, context);
+@@ -256,7 +256,7 @@ public class Commands {
+         StopwatchCommand.register(this.dispatcher);
+         SummonCommand.register(this.dispatcher, context);
+         //TagCommand.register(this.dispatcher); // Folia - region threading - TODO later
+-        //TeamCommand.register(this.dispatcher, context); // Folia - region threading - TODO later
++        TeamCommand.register(this.dispatcher, context); // Tessera - thread safe scoreboard
+         //TeamMsgCommand.register(this.dispatcher); // Folia - region threading - TODO later
+         TeleportCommand.register(this.dispatcher);
+         TellRawCommand.register(this.dispatcher, context);
+@@ -264,7 +264,7 @@ public class Commands {
+         //TickCommand.register(this.dispatcher); // Folia - region threading - TODO later
+         TimeCommand.register(this.dispatcher, context);
+         TitleCommand.register(this.dispatcher, context);
+-        //TriggerCommand.register(this.dispatcher); // Folia - region threading - TODO later
++        TriggerCommand.register(this.dispatcher); // Tessera - thread safe scoreboard
+         //WaypointCommand.register(this.dispatcher, context); // Folia - region threading - TODO later
+         WeatherCommand.register(this.dispatcher);
+         WorldBorderCommand.register(this.dispatcher);
+diff --git a/net/minecraft/server/ServerScoreboard.java b/net/minecraft/server/ServerScoreboard.java
+index 3c1d3c873e857a16ed33dcd77ab937017256776c..c2aa8fd4dee75755c7fe425beb1eccc6aae88ed2 100644
+--- a/net/minecraft/server/ServerScoreboard.java
++++ b/net/minecraft/server/ServerScoreboard.java
+@@ -48,7 +48,7 @@ public class ServerScoreboard extends Scoreboard {
+     }
+ 
+     @Override
+-    protected void onScoreChanged(final ScoreHolder owner, final Objective objective, final Score score) {
++    protected synchronized void onScoreChanged(final ScoreHolder owner, final Objective objective, final Score score) { // Tessera - thread safe scoreboard
+         super.onScoreChanged(owner, objective, score);
+         if (this.trackedObjectives.contains(objective)) {
+             this.broadcastAll( // CraftBukkit
+@@ -92,7 +92,7 @@ public class ServerScoreboard extends Scoreboard {
+     }
+ 
+     @Override
+-    public void setDisplayObjective(final DisplaySlot slot, final @Nullable Objective objective) {
++    public synchronized void setDisplayObjective(final DisplaySlot slot, final @Nullable Objective objective) { // Tessera - thread safe scoreboard
+         Objective old = this.getDisplayObjective(slot);
+         super.setDisplayObjective(slot, objective);
+         if (old != objective && old != null) {
+@@ -115,7 +115,7 @@ public class ServerScoreboard extends Scoreboard {
+     }
+ 
+     @Override
+-    public boolean addPlayerToTeam(final String player, final PlayerTeam team) {
++    public synchronized boolean addPlayerToTeam(final String player, final PlayerTeam team) { // Tessera - thread safe scoreboard
+         if (super.addPlayerToTeam(player, team)) {
+             this.broadcastAll(ClientboundSetPlayerTeamPacket.createPlayerPacket(team, player, ClientboundSetPlayerTeamPacket.Action.ADD)); // CraftBukkit
+             this.updatePlayerWaypoint(player);
+@@ -127,7 +127,7 @@ public class ServerScoreboard extends Scoreboard {
+     }
+ 
+     // Paper start - Multiple Entries with Scoreboards
+-    public boolean addPlayersToTeam(java.util.Collection<String> players, PlayerTeam team) {
++    public synchronized boolean addPlayersToTeam(java.util.Collection<String> players, PlayerTeam team) { // Tessera - thread safe scoreboard
+         boolean anyAdded = false;
+         for (String playerName : players) {
+             if (super.addPlayerToTeam(playerName, team)) {
+@@ -146,7 +146,7 @@ public class ServerScoreboard extends Scoreboard {
+     // Paper end - Multiple Entries with Scoreboards
+ 
+     @Override
+-    public void removePlayerFromTeam(final String player, final PlayerTeam team) {
++    public synchronized void removePlayerFromTeam(final String player, final PlayerTeam team) { // Tessera - thread safe scoreboard
+         super.removePlayerFromTeam(player, team);
+         this.broadcastAll(ClientboundSetPlayerTeamPacket.createPlayerPacket(team, player, ClientboundSetPlayerTeamPacket.Action.REMOVE)); // CraftBukkit
+         this.updatePlayerWaypoint(player);
+@@ -154,7 +154,7 @@ public class ServerScoreboard extends Scoreboard {
+     }
+ 
+     // Paper start - Multiple Entries with Scoreboards
+-    public void removePlayersFromTeam(java.util.Collection<String> players, PlayerTeam team) {
++    public synchronized void removePlayersFromTeam(java.util.Collection<String> players, PlayerTeam team) { // Tessera - thread safe scoreboard
+         for (String playerName : players) {
+             super.removePlayerFromTeam(playerName, team);
+         }
+@@ -171,7 +171,7 @@ public class ServerScoreboard extends Scoreboard {
+     }
+ 
+     @Override
+-    public void onObjectiveChanged(final Objective objective) {
++    public synchronized void onObjectiveChanged(final Objective objective) { // Tessera - thread safe scoreboard
+         super.onObjectiveChanged(objective);
+         if (this.trackedObjectives.contains(objective)) {
+             this.broadcastAll(new ClientboundSetObjectivePacket(objective, ClientboundSetObjectivePacket.METHOD_CHANGE)); // CraftBukkit
+@@ -198,7 +198,7 @@ public class ServerScoreboard extends Scoreboard {
+     }
+ 
+     @Override
+-    public void onTeamChanged(final PlayerTeam team) {
++    public synchronized void onTeamChanged(final PlayerTeam team) { // Tessera - thread safe scoreboard
+         super.onTeamChanged(team);
+         this.broadcastAll(ClientboundSetPlayerTeamPacket.createAddOrModifyPacket(team, false)); // CraftBukkit
+         this.updateTeamWaypoints(team);
+@@ -217,7 +217,7 @@ public class ServerScoreboard extends Scoreboard {
+         this.dirty = true;
+     }
+ 
+-    public void storeToSaveDataIfDirty(final ScoreboardSaveData saveData) {
++    public synchronized void storeToSaveDataIfDirty(final ScoreboardSaveData saveData) { // Tessera - thread safe scoreboard
+         if (this.dirty) {
+             this.dirty = false;
+             saveData.setData(this.store());
+@@ -245,11 +245,11 @@ public class ServerScoreboard extends Scoreboard {
+         return packets;
+     }
+ 
+-    public void startTrackingObjective(final Objective objective) {
++    public synchronized void startTrackingObjective(final Objective objective) { // Tessera - thread safe scoreboard
+         List<Packet<?>> packets = this.getStartTrackingPackets(objective);
+ 
+         for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
+-            if (player.getBukkitEntity().getScoreboard().getHandle() != this) continue; // CraftBukkit - Only players on this board
++            if (!player.scoreboardSynced || player.getBukkitEntity().getScoreboard().getHandle() != this) continue; // CraftBukkit - Only players on this board // Tessera - thread safe scoreboard
+             for (Packet<?> packet : packets) {
+                 player.connection.send(packet);
+             }
+@@ -271,11 +271,11 @@ public class ServerScoreboard extends Scoreboard {
+         return packets;
+     }
+ 
+-    public void stopTrackingObjective(final Objective objective) {
++    public synchronized void stopTrackingObjective(final Objective objective) { // Tessera - thread safe scoreboard
+         List<Packet<?>> packets = this.getStopTrackingPackets(objective);
+ 
+         for (ServerPlayer player : this.server.getPlayerList().getPlayers()) {
+-            if (player.getBukkitEntity().getScoreboard().getHandle() != this) continue; // CraftBukkit - Only players on this board
++            if (!player.scoreboardSynced || player.getBukkitEntity().getScoreboard().getHandle() != this) continue; // CraftBukkit - Only players on this board // Tessera - thread safe scoreboard
+             for (Packet<?> packet : packets) {
+                 player.connection.send(packet);
+             }
+@@ -315,7 +315,7 @@ public class ServerScoreboard extends Scoreboard {
+     // CraftBukkit start - Send to players
+     private void broadcastAll(Packet<?> packet) {
+         for (ServerPlayer serverPlayer : this.server.getPlayerList().getPlayers()) {
+-            if (serverPlayer.getBukkitEntity().getScoreboard().getHandle() == this) {
++            if (serverPlayer.scoreboardSynced && serverPlayer.getBukkitEntity().getScoreboard().getHandle() == this) { // Tessera - thread safe scoreboard; skip players who were not sent the board yet
+                 serverPlayer.connection.send(packet);
+             }
+         }
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index a5c62db77f08effaed9e04436d093f02e8292af8..59832e44dc94fe1ec39f218717f7e09405f2f8dc 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -3238,7 +3238,7 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+                 ServerLevel.this.getWaypointManager().untrackWaypoint(waypoint);
+             }
+ 
+-            //ServerLevel.this.getScoreboard().entityRemoved(entity); // Folia - region threading
++            ServerLevel.this.getScoreboard().entityRemoved(entity); // Tessera - thread safe scoreboard
+         }
+ 
+         @Override
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 298db1183ce84457be3d9e96f0f2b75d2ac08049..a76215f00a0af8d35c2f08e543e3215d5c3a3613 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -442,6 +442,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     public boolean joining = true;
+     public boolean sentListPacket = false;
+     public boolean suppressTrackerForLogin = false; // Paper - Fire PlayerJoinEvent when Player is actually ready
++    public volatile boolean scoreboardSynced; // Tessera - thread safe scoreboard; set once the player was sent its whole scoreboard
+     // CraftBukkit end
+     public boolean isRealPlayer; // Paper
+     public com.destroystokyo.paper.event.entity.@Nullable PlayerNaturallySpawnCreaturesEvent playerNaturallySpawnedEvent; // Paper - PlayerNaturallySpawnCreaturesEvent
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index 2bb63bb31788b76c08813803a4fe73688cc4e0de..652a69d1f76a94363a0dd878da41ac78cdb94855 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -274,7 +274,17 @@ public abstract class PlayerList {
+         this.sendPlayerPermissionLevel(player);
+         player.getStats().markAllDirty();
+         player.getRecipeBook().sendInitialRecipeBook(player);
+-        //this.updateEntireScoreboard(level.getScoreboard(), player); // Folia - region threading
++        // Tessera start - thread safe scoreboard; the board's changes reach the player only after it is sent whole
++        while (!player.scoreboardSynced) {
++            final ServerScoreboard playerScoreboard = (ServerScoreboard) player.getBukkitEntity().getScoreboard().getHandle();
++            synchronized (playerScoreboard) {
++                if (player.getBukkitEntity().getScoreboard().getHandle() == playerScoreboard) { // a plugin may have swapped the board meanwhile
++                    this.updateEntireScoreboard(playerScoreboard, player);
++                    player.scoreboardSynced = true;
++                }
++            }
++        }
++        // Tessera end - thread safe scoreboard
+         this.server.invalidateStatus();
+         MutableComponent component;
+         if (player.getGameProfile().name().equalsIgnoreCase(oldName)) {
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 68a42a5ae1d8949c48df73ec588c5a407a0c43ad..cf3a2546f18c427b07dab2d4d76959a287314cc6 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -3861,11 +3861,7 @@ public abstract class Entity
+     }
+ 
+     public @Nullable PlayerTeam getTeam() {
+-        // Folia start - region threading
+-        if (true) {
+-            return null;
+-        }
+-        // Folia end - region threading
++        // Tessera - thread safe scoreboard; teams can be read from any region again
+         if (!this.level().paperConfig().scoreboards.allowNonPlayerEntitiesOnScoreboards && !(this instanceof Player)) { return null; } // Paper - Perf: Disable Scoreboards for non players by default
+         return this.level().getScoreboard().getPlayersTeam(this.getScoreboardName());
+     }
+diff --git a/net/minecraft/world/scores/PlayerTeam.java b/net/minecraft/world/scores/PlayerTeam.java
+index 2bdbb8451974f0b8d6e94d390ac735f4ccffd954..a843a67b35336d42b16ba2aa91645fff3b656957 100644
+--- a/net/minecraft/world/scores/PlayerTeam.java
++++ b/net/minecraft/world/scores/PlayerTeam.java
+@@ -25,16 +25,18 @@ public class PlayerTeam extends Team {
+     private static final byte BIT_SEE_INVISIBLES = 2;
+     private final Scoreboard scoreboard;
+     private final String name;
+-    private final Set<String> players = Sets.newHashSet();
+-    private Component displayName;
+-    private Component playerPrefix = CommonComponents.EMPTY;
+-    private Component playerSuffix = CommonComponents.EMPTY;
+-    private boolean allowFriendlyFire = true;
+-    private boolean seeFriendlyInvisibles = true;
+-    private Team.Visibility nameTagVisibility = Team.Visibility.ALWAYS;
+-    private Team.Visibility deathMessageVisibility = Team.Visibility.ALWAYS;
+-    private Optional<TeamColor> color = Optional.empty();
+-    private Team.CollisionRule collisionRule = Team.CollisionRule.ALWAYS;
++    // Tessera start - thread safe scoreboard; teams are read from every region
++    private final Set<String> players = Sets.newConcurrentHashSet();
++    private volatile Component displayName;
++    private volatile Component playerPrefix = CommonComponents.EMPTY;
++    private volatile Component playerSuffix = CommonComponents.EMPTY;
++    private volatile boolean allowFriendlyFire = true;
++    private volatile boolean seeFriendlyInvisibles = true;
++    private volatile Team.Visibility nameTagVisibility = Team.Visibility.ALWAYS;
++    private volatile Team.Visibility deathMessageVisibility = Team.Visibility.ALWAYS;
++    private volatile Optional<TeamColor> color = Optional.empty();
++    private volatile Team.CollisionRule collisionRule = Team.CollisionRule.ALWAYS;
++    // Tessera end - thread safe scoreboard
+     private final Style displayNameStyle;
+ 
+     public PlayerTeam(final Scoreboard scoreboard, final String name) {
+diff --git a/net/minecraft/world/scores/Scoreboard.java b/net/minecraft/world/scores/Scoreboard.java
+index 4a15851bda30c918c58c96d2cb98b74f30db396c..62aabc0b6266033bc0b1e29cdd6b1da1d1e4837d 100644
+--- a/net/minecraft/world/scores/Scoreboard.java
++++ b/net/minecraft/world/scores/Scoreboard.java
+@@ -30,18 +30,36 @@ import org.slf4j.Logger;
+ public class Scoreboard {
+     public static final String HIDDEN_SCORE_PREFIX = "#";
+     private static final Logger LOGGER = LogUtils.getLogger();
+-    private final Object2ObjectMap<String, Objective> objectivesByName = new Object2ObjectOpenHashMap<>(16, 0.5F);
+-    private final Reference2ObjectMap<ObjectiveCriteria, List<Objective>> objectivesByCriteria = new Reference2ObjectOpenHashMap<>();
+-    private final Map<String, PlayerScores> playerScores = new Object2ObjectOpenHashMap<>(16, 0.5F);
++    // Tessera start - thread safe scoreboard
++    // Every change holds the scoreboard monitor, so the packets a change sends reach each player in the
++    // order the changes were made. The maps are concurrent because entities read them from every region
++    // without the monitor.
++    private final Map<String, Objective> objectivesByName = new java.util.concurrent.ConcurrentHashMap<>();
++    private final Map<ObjectiveCriteria, List<Objective>> objectivesByCriteria = new java.util.concurrent.ConcurrentHashMap<>();
++    private final Map<String, PlayerScores> playerScores = new java.util.concurrent.ConcurrentHashMap<>();
+     private final Map<DisplaySlot, Objective> displayObjectives = new EnumMap<>(DisplaySlot.class);
+-    private final Object2ObjectMap<String, PlayerTeam> teamsByName = new Object2ObjectOpenHashMap<>();
+-    private final Object2ObjectMap<String, PlayerTeam> teamsByPlayer = new Object2ObjectOpenHashMap<>();
++    private final Map<String, PlayerTeam> teamsByName = new java.util.concurrent.ConcurrentHashMap<>();
++    private final Map<String, PlayerTeam> teamsByPlayer = new java.util.concurrent.ConcurrentHashMap<>();
++    private static final java.util.concurrent.atomic.AtomicLong LOCK_ORDER = new java.util.concurrent.atomic.AtomicLong();
++    public final long lockOrder = LOCK_ORDER.getAndIncrement();
++
++    // Runs the action holding the monitors of both scoreboards, always taken in the same order
++    public static void lockBoth(final Scoreboard first, final Scoreboard second, final Runnable action) {
++        final Scoreboard outer = first.lockOrder <= second.lockOrder ? first : second;
++        final Scoreboard inner = outer == first ? second : first;
++        synchronized (outer) {
++            synchronized (inner) {
++                action.run();
++            }
++        }
++    }
++    // Tessera end - thread safe scoreboard
+ 
+     public @Nullable Objective getObjective(final @Nullable String name) {
+-        return this.objectivesByName.get(name);
++        return name == null ? null : this.objectivesByName.get(name); // Tessera - thread safe scoreboard
+     }
+ 
+-    public Objective addObjective(
++    public synchronized Objective addObjective( // Tessera - thread safe scoreboard
+         final String name,
+         final ObjectiveCriteria criteria,
+         final Component displayName,
+@@ -61,7 +79,15 @@ public class Scoreboard {
+     }
+ 
+     public final void forAllObjectives(final ObjectiveCriteria criteria, final ScoreHolder name, final Consumer<ScoreAccess> operation) {
+-        this.objectivesByCriteria.getOrDefault(criteria, Collections.emptyList()).forEach(o -> operation.accept(this.getOrCreatePlayerScore(name, o, true)));
++        // Tessera start - thread safe scoreboard; called for every awarded stat, so skip the monitor when nothing tracks the criteria
++        final List<Objective> objectives = this.objectivesByCriteria.get(criteria);
++        if (objectives == null || objectives.isEmpty()) {
++            return;
++        }
++        synchronized (this) {
++            objectives.forEach(o -> operation.accept(this.getOrCreatePlayerScore(name, o, true)));
++        }
++        // Tessera end - thread safe scoreboard
+     }
+ 
+     private PlayerScores getOrCreatePlayerInfo(final String name) {
+@@ -72,7 +98,7 @@ public class Scoreboard {
+         return this.getOrCreatePlayerScore(holder, objective, false);
+     }
+ 
+-    public ScoreAccess getOrCreatePlayerScore(final ScoreHolder scoreHolder, final Objective objective, final boolean forceWritable) {
++    public synchronized ScoreAccess getOrCreatePlayerScore(final ScoreHolder scoreHolder, final Objective objective, final boolean forceWritable) { // Tessera - thread safe scoreboard
+         final boolean canModify = forceWritable || !objective.getCriteria().isReadOnly();
+         PlayerScores playerScore = this.getOrCreatePlayerInfo(scoreHolder.getScoreboardName());
+         final MutableBoolean requiresSync = new MutableBoolean();
+@@ -85,6 +111,7 @@ public class Scoreboard {
+ 
+             @Override
+             public void set(final int value) {
++                synchronized (Scoreboard.this) { // Tessera - thread safe scoreboard
+                 if (!canModify) {
+                     throw new IllegalStateException("Cannot modify read-only score");
+                 }
+@@ -106,6 +133,7 @@ public class Scoreboard {
+                 if (hasChanged) {
+                     this.sendScoreToPlayers();
+                 }
++                } // Tessera - thread safe scoreboard
+             }
+ 
+             @Override
+@@ -115,16 +143,20 @@ public class Scoreboard {
+ 
+             @Override
+             public void display(final @Nullable Component display) {
++                synchronized (Scoreboard.this) { // Tessera - thread safe scoreboard
+                 if (requiresSync.isTrue() || !Objects.equals(display, score.display())) {
+                     score.display(display);
+                     this.sendScoreToPlayers();
+                 }
++                } // Tessera - thread safe scoreboard
+             }
+ 
+             @Override
+             public void numberFormatOverride(final @Nullable NumberFormat numberFormat) {
++                synchronized (Scoreboard.this) { // Tessera - thread safe scoreboard
+                 score.numberFormat(numberFormat);
+                 this.sendScoreToPlayers();
++                } // Tessera - thread safe scoreboard
+             }
+ 
+             @Override
+@@ -143,12 +175,14 @@ public class Scoreboard {
+             }
+ 
+             private void setLocked(final boolean locked) {
++                synchronized (Scoreboard.this) { // Tessera - thread safe scoreboard
+                 score.setLocked(locked);
+                 if (requiresSync.isTrue()) {
+                     this.sendScoreToPlayers();
+                 }
+ 
+                 Scoreboard.this.onScoreLockChanged(scoreHolder, objective);
++                } // Tessera - thread safe scoreboard
+             }
+ 
+             private void sendScoreToPlayers() {
+@@ -158,12 +192,12 @@ public class Scoreboard {
+         };
+     }
+ 
+-    public @Nullable ReadOnlyScoreInfo getPlayerScoreInfo(final ScoreHolder name, final Objective objective) {
++    public synchronized @Nullable ReadOnlyScoreInfo getPlayerScoreInfo(final ScoreHolder name, final Objective objective) { // Tessera - thread safe scoreboard
+         PlayerScores playerScore = this.playerScores.get(name.getScoreboardName());
+         return playerScore != null ? playerScore.get(objective) : null;
+     }
+ 
+-    public Collection<PlayerScoreEntry> listPlayerScores(final Objective objective) {
++    public synchronized Collection<PlayerScoreEntry> listPlayerScores(final Objective objective) { // Tessera - thread safe scoreboard
+         List<PlayerScoreEntry> result = new ArrayList<>();
+         this.playerScores.forEach((player, scores) -> {
+             Score score = scores.get(objective);
+@@ -182,18 +216,18 @@ public class Scoreboard {
+         return this.objectivesByName.keySet();
+     }
+ 
+-    public Collection<ScoreHolder> getTrackedPlayers() {
++    public synchronized Collection<ScoreHolder> getTrackedPlayers() { // Tessera - thread safe scoreboard
+         return this.playerScores.keySet().stream().map(ScoreHolder::forNameOnly).toList();
+     }
+ 
+-    public void resetAllPlayerScores(final ScoreHolder player) {
++    public synchronized void resetAllPlayerScores(final ScoreHolder player) { // Tessera - thread safe scoreboard
+         PlayerScores removed = this.playerScores.remove(player.getScoreboardName());
+         if (removed != null) {
+             this.onPlayerRemoved(player);
+         }
+     }
+ 
+-    public void resetSinglePlayerScore(final ScoreHolder player, final Objective objective) {
++    public synchronized void resetSinglePlayerScore(final ScoreHolder player, final Objective objective) { // Tessera - thread safe scoreboard
+         PlayerScores scores = this.playerScores.get(player.getScoreboardName());
+         if (scores != null) {
+             boolean hasRemoved = scores.remove(objective);
+@@ -208,12 +242,12 @@ public class Scoreboard {
+         }
+     }
+ 
+-    public Object2IntMap<Objective> listPlayerScores(final ScoreHolder player) {
++    public synchronized Object2IntMap<Objective> listPlayerScores(final ScoreHolder player) { // Tessera - thread safe scoreboard
+         PlayerScores scores = this.playerScores.get(player.getScoreboardName());
+         return scores != null ? scores.listScores() : Object2IntMaps.emptyMap();
+     }
+ 
+-    public void removeObjective(final Objective objective) {
++    public synchronized void removeObjective(final Objective objective) { // Tessera - thread safe scoreboard
+         this.objectivesByName.remove(objective.getName());
+ 
+         for (DisplaySlot value : DisplaySlot.values()) {
+@@ -234,7 +268,7 @@ public class Scoreboard {
+         this.onObjectiveRemoved(objective);
+     }
+ 
+-    public void setDisplayObjective(final DisplaySlot slot, final @Nullable Objective objective) {
++    public synchronized void setDisplayObjective(final DisplaySlot slot, final @Nullable Objective objective) { // Tessera - thread safe scoreboard
+         this.displayObjectives.put(slot, objective);
+     }
+ 
+@@ -243,10 +277,10 @@ public class Scoreboard {
+     }
+ 
+     public @Nullable PlayerTeam getPlayerTeam(final String name) {
+-        return this.teamsByName.get(name);
++        return name == null ? null : this.teamsByName.get(name); // Tessera - thread safe scoreboard
+     }
+ 
+-    public PlayerTeam addPlayerTeam(final String name) {
++    public synchronized PlayerTeam addPlayerTeam(final String name) { // Tessera - thread safe scoreboard
+         PlayerTeam team = this.getPlayerTeam(name);
+         if (team != null) {
+             LOGGER.warn("Requested creation of existing team '{}'", name);
+@@ -259,7 +293,7 @@ public class Scoreboard {
+         }
+     }
+ 
+-    public void removePlayerTeam(final PlayerTeam team) {
++    public synchronized void removePlayerTeam(final PlayerTeam team) { // Tessera - thread safe scoreboard
+         this.teamsByName.remove(team.getName());
+ 
+         for (String player : team.getPlayers()) {
+@@ -269,7 +303,7 @@ public class Scoreboard {
+         this.onTeamRemoved(team);
+     }
+ 
+-    public boolean addPlayerToTeam(final String player, final PlayerTeam team) {
++    public synchronized boolean addPlayerToTeam(final String player, final PlayerTeam team) { // Tessera - thread safe scoreboard
+         if (this.getPlayersTeam(player) != null) {
+             this.removePlayerFromTeam(player);
+         }
+@@ -278,7 +312,7 @@ public class Scoreboard {
+         return team.getPlayers().add(player);
+     }
+ 
+-    public boolean removePlayerFromTeam(final String player) {
++    public synchronized boolean removePlayerFromTeam(final String player) { // Tessera - thread safe scoreboard
+         PlayerTeam team = this.getPlayersTeam(player);
+         if (team != null) {
+             this.removePlayerFromTeam(player, team);
+@@ -288,7 +322,7 @@ public class Scoreboard {
+         }
+     }
+ 
+-    public void removePlayerFromTeam(final String player, final PlayerTeam team) {
++    public synchronized void removePlayerFromTeam(final String player, final PlayerTeam team) { // Tessera - thread safe scoreboard
+         if (this.getPlayersTeam(player) != team) {
+             throw new IllegalStateException("Player is either on another team or not on any team. Cannot remove from team '" + team.getName() + "'.");
+         }
+@@ -306,7 +340,7 @@ public class Scoreboard {
+     }
+ 
+     public @Nullable PlayerTeam getPlayersTeam(final String name) {
+-        return this.teamsByPlayer.get(name);
++        return name == null ? null : this.teamsByPlayer.get(name); // Tessera - thread safe scoreboard
+     }
+ 
+     public void onObjectiveAdded(final Objective objective) {
+@@ -340,13 +374,21 @@ public class Scoreboard {
+     }
+ 
+     public void entityRemoved(final Entity entity) {
++        // Tessera start - thread safe scoreboard; called for every removed entity, so look before taking the monitor
++        final String name = entity.getScoreboardName();
++        if (!this.playerScores.containsKey(name) && !this.teamsByPlayer.containsKey(name)) {
++            return;
++        }
++        synchronized (this) {
++        // Tessera end - thread safe scoreboard
+         if (!(entity instanceof Player) && !entity.isAlive()) {
+             this.resetAllPlayerScores(entity);
+             this.removePlayerFromTeam(entity.getScoreboardName());
+         }
++        } // Tessera - thread safe scoreboard
+     }
+ 
+-    protected List<Scoreboard.PackedScore> packPlayerScores() {
++    protected synchronized List<Scoreboard.PackedScore> packPlayerScores() { // Tessera - thread safe scoreboard
+         return this.playerScores
+             .entrySet()
+             .stream()

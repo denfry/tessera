@@ -1,0 +1,159 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 29 Oct 2026 15:35:07 +0300
+Subject: [PATCH] Support plugin and per-player scoreboards
+
+Bukkit.getScoreboardManager().getNewScoreboard(), Player#setScoreboard,
+registerNewObjective, registerNewTeam and clearSlot threw
+UnsupportedOperationException. The scoreboard is thread safe now, so
+they are enabled. Switching a player's board holds both boards, taken
+in a fixed order, so no change to either reaches the player between the
+remove and the add packets. The list of boards that track criteria is
+copy-on-write, because stats are awarded from every region.
+
+Fixes PaperMC/Folia#25
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index f3ec95b3a2fce21c347983ef9e9752b4d89f1b39..5b202a3fcb618c8bac860d88cbef0dc71bf92cde 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -251,7 +251,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+     private CraftWorldBorder clientWorldBorder = null;
+     private BorderChangeListener clientWorldBorderListener = this.createWorldBorderListener();
+     private long lastSaveTime; // Paper - getLastPlayed replacement API
+-    private @Nullable CraftScoreboard scoreboardOverride;
++    private volatile @Nullable CraftScoreboard scoreboardOverride; // Tessera - thread safe scoreboard
+     public final net.minecraft.network.PacketProcessor packetProcessor = new net.minecraft.network.PacketProcessor(null); // Folia
+ 
+     // Folia start - region threading
+diff --git a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboard.java b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboard.java
+index b959fe4311fc6cbae3dcc052ef4710f8c8aefec6..f2878a49fdca9725854bc6ce88031f8a611c96e4 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboard.java
++++ b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboard.java
+@@ -32,7 +32,6 @@ public final class CraftScoreboard implements org.bukkit.scoreboard.Scoreboard {
+ 
+     @Override
+     public Objective registerNewObjective(String name, Criteria criteria, net.kyori.adventure.text.Component displayName, RenderType renderType) throws IllegalArgumentException {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not supported yet
+         if (displayName == null) {
+             displayName = net.kyori.adventure.text.Component.empty();
+         }
+@@ -178,7 +177,6 @@ public final class CraftScoreboard implements org.bukkit.scoreboard.Scoreboard {
+ 
+     @Override
+     public Team registerNewTeam(String name) {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not supported yet
+         Preconditions.checkArgument(name != null, "Team name cannot be null");
+         Preconditions.checkArgument(name.length() <= Short.MAX_VALUE, "Team name '%s' is longer than the limit of 32767 characters (%s)", name, name.length());
+         Preconditions.checkArgument(this.getHandle().getPlayerTeam(name) == null, "Team name '%s' is already in use", name);
+@@ -206,7 +204,6 @@ public final class CraftScoreboard implements org.bukkit.scoreboard.Scoreboard {
+ 
+     @Override
+     public void clearSlot(DisplaySlot slot) {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not supported yet
+         Preconditions.checkArgument(slot != null, "Slot cannot be null");
+         this.getHandle().setDisplayObjective(CraftScoreboardTranslations.fromBukkitSlot(slot), null);
+     }
+diff --git a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboardManager.java b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboardManager.java
+index ab76c7f9bb0a4980a07a4d08c0d3ecadbca9668b..ab099764b70f65b1091e71cc05e9743919741967 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboardManager.java
++++ b/src/main/java/org/bukkit/craftbukkit/scoreboard/CraftScoreboardManager.java
+@@ -22,13 +22,13 @@ import org.bukkit.scoreboard.ScoreboardManager;
+ public final class CraftScoreboardManager implements ScoreboardManager {
+     private final CraftScoreboard mainScoreboard;
+     private final MinecraftServer server;
+-    private final Collection<CraftScoreboard> scoreboards = new WeakCollection<>();
++    private final java.util.List<java.lang.ref.WeakReference<CraftScoreboard>> scoreboards = new java.util.concurrent.CopyOnWriteArrayList<>(); // Tessera - thread safe scoreboard; walked from every region
+ 
+     public CraftScoreboardManager(MinecraftServer server, net.minecraft.world.scores.Scoreboard scoreboard) {
+         this.mainScoreboard = new CraftScoreboard(scoreboard);
+         this.mainScoreboard.registeredGlobally = true;
+         this.server = server;
+-        this.scoreboards.add(this.mainScoreboard);
++        this.scoreboards.add(new java.lang.ref.WeakReference<>(this.mainScoreboard)); // Tessera - thread safe scoreboard
+     }
+ 
+     @Override
+@@ -38,19 +38,18 @@ public final class CraftScoreboardManager implements ScoreboardManager {
+ 
+     @Override
+     public CraftScoreboard getNewScoreboard() {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not supported yet
+         org.spigotmc.AsyncCatcher.catchOp("scoreboard creation"); // Spigot
+         CraftScoreboard scoreboard = new CraftScoreboard(new ServerScoreboard(this.server));
+         if (io.papermc.paper.configuration.GlobalConfiguration.get().scoreboards.trackPluginScoreboards) {
+             scoreboard.registeredGlobally = true;
+-            this.scoreboards.add(scoreboard);
++            this.scoreboards.add(new java.lang.ref.WeakReference<>(scoreboard)); // Tessera - thread safe scoreboard
+         }
+         return scoreboard;
+     }
+ 
+     public void registerScoreboardForVanilla(CraftScoreboard scoreboard) {
+         org.spigotmc.AsyncCatcher.catchOp("scoreboard registration");
+-        this.scoreboards.add(scoreboard);
++        this.scoreboards.add(new java.lang.ref.WeakReference<>(scoreboard)); // Tessera - thread safe scoreboard
+     }
+ 
+     public CraftScoreboard getPlayerBoard(CraftPlayer player) {
+@@ -59,12 +58,28 @@ public final class CraftScoreboardManager implements ScoreboardManager {
+     }
+ 
+     public void setPlayerBoard(CraftPlayer player, CraftScoreboard scoreboard) {
+-        if (true) throw new UnsupportedOperationException(); // Folia - not supported yet
+-        net.minecraft.world.scores.Scoreboard oldBoard = this.getPlayerBoard(player).getHandle();
+-        net.minecraft.world.scores.Scoreboard newBoard = scoreboard.getHandle();
+-        if (oldBoard == newBoard) {
+-            return;
++        // Tessera start - thread safe scoreboard; hold both boards so no change of either slips between the packets
++        while (true) {
++            final net.minecraft.world.scores.Scoreboard oldBoard = this.getPlayerBoard(player).getHandle();
++            final net.minecraft.world.scores.Scoreboard newBoard = scoreboard.getHandle();
++            if (oldBoard == newBoard) {
++                return;
++            }
++            final boolean[] swapped = new boolean[1];
++            net.minecraft.world.scores.Scoreboard.lockBoth(oldBoard, newBoard, () -> {
++                if (this.getPlayerBoard(player).getHandle() == oldBoard) {
++                    this.swapPlayerBoard(player, scoreboard, oldBoard, newBoard);
++                    swapped[0] = true;
++                }
++            });
++            if (swapped[0]) {
++                return;
++            }
+         }
++    }
++
++    private void swapPlayerBoard(CraftPlayer player, CraftScoreboard scoreboard, net.minecraft.world.scores.Scoreboard oldBoard, net.minecraft.world.scores.Scoreboard newBoard) {
++        // Tessera end - thread safe scoreboard
+ 
+         if (scoreboard == this.mainScoreboard) {
+             player.setScoreboardOverride(null);
+@@ -73,6 +88,9 @@ public final class CraftScoreboardManager implements ScoreboardManager {
+         }
+ 
+         ServerPlayer serverPlayer = player.getHandle();
++        if (!serverPlayer.scoreboardSynced) {
++            return; // Tessera - thread safe scoreboard; the player is sent its board whole when it joins
++        }
+ 
+         // Old objective tracking
+         HashSet<Objective> removed = new HashSet<>();
+@@ -100,8 +118,15 @@ public final class CraftScoreboardManager implements ScoreboardManager {
+ 
+     // CraftBukkit method
+     public void forAllObjectives(ObjectiveCriteria criteria, ScoreHolder holder, Consumer<ScoreAccess> consumer) {
+-        for (CraftScoreboard scoreboard : this.scoreboards) {
++        // Tessera start - thread safe scoreboard
++        for (java.lang.ref.WeakReference<CraftScoreboard> reference : this.scoreboards) {
++            CraftScoreboard scoreboard = reference.get();
++            if (scoreboard == null) {
++                this.scoreboards.remove(reference);
++                continue;
++            }
+             scoreboard.getHandle().forAllObjectives(criteria, holder, consumer);
+         }
++        // Tessera end - thread safe scoreboard
+     }
+ }
