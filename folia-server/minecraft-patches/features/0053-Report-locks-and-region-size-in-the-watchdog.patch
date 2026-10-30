@@ -1,0 +1,120 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Fri, 30 Oct 2026 11:51:28 +0300
+Subject: [PATCH] Report locks and region size in the watchdog
+
+
+diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+index e9ca1a15049b0211d10401cb78e953b93afaf6c7..6c594cbde02f8ae0e330f41bccd733e83b44bfcf 100644
+--- a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
++++ b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+@@ -6,10 +6,16 @@ import net.minecraft.server.MinecraftServer;
+ import org.bukkit.Bukkit;
+ import org.slf4j.Logger;
+ import org.spigotmc.WatchdogThread;
++import java.lang.management.LockInfo; // Tessera - detailed watchdog report
+ import java.lang.management.ManagementFactory;
++import java.lang.management.MonitorInfo; // Tessera - detailed watchdog report
++import java.lang.management.ThreadInfo; // Tessera - detailed watchdog report
++import java.lang.management.ThreadMXBean; // Tessera - detailed watchdog report
+ import java.util.ArrayList;
++import java.util.HashSet; // Tessera - detailed watchdog report
+ import java.util.LinkedHashSet;
+ import java.util.List;
++import java.util.Set; // Tessera - detailed watchdog report
+ import java.util.concurrent.TimeUnit;
+ 
+ public final class FoliaWatchdogThread extends Thread {
+@@ -73,23 +79,87 @@ public final class FoliaWatchdogThread extends Thread {
+                 final double totalElapsedS = (double)(now - tick.start) / 1.0E9;
+ 
+                 if (tick.handle instanceof TickRegions.ConcreteRegionTickHandle region) {
++                    // Tessera start - detailed watchdog report
++                    final TickRegions.RegionStats stats = region.region.getRegionStats();
+                     LOGGER.error(
+                         "Tick region located in world '" + region.region.world.getWorld().getName() + "' around chunk '"
+-                            + region.region.region.getCenterChunk() + "' has not responded in " + totalElapsedS + "s:"
++                            + region.region.region.getCenterChunk() + "' has not responded in " + totalElapsedS + "s"
++                            + " (chunks: " + stats.getChunkCount() + ", entities: " + stats.getEntityCount()
++                            + ", players: " + stats.getPlayerCount() + "):"
+                     );
++                    // Tessera end - detailed watchdog report
+                 } else {
+                     // assume global
+                     LOGGER.error("Global region has not responded in " + totalElapsedS + "s:");
+                 }
+ 
+-                WatchdogThread.dumpThread(
+-                    ManagementFactory.getThreadMXBean().getThreadInfo(tick.thread.threadId(), Integer.MAX_VALUE),
+-                    Bukkit.getServer().getLogger()
+-                );
++                dumpThreadWithLocks(tick.thread); // Tessera - detailed watchdog report
+             }
+         }
+     }
+ 
++    // Tessera start - detailed watchdog report
++    // Like jstack: thread state, the lock the thread waits for and its owner, the monitors and locks it holds.
++    // The owner of the awaited lock is dumped too (a few hops), since a hung region usually waits for another thread.
++    private static final int MAX_LOCK_OWNER_HOPS = 3;
++
++    private static void dumpThreadWithLocks(final Thread thread) {
++        final ThreadMXBean threads = ManagementFactory.getThreadMXBean();
++        final long[] deadlocked = threads.isSynchronizerUsageSupported() ? threads.findDeadlockedThreads() : threads.findMonitorDeadlockedThreads();
++        final Set<Long> dumped = new HashSet<>();
++        long threadId = thread.threadId();
++        for (int hop = 0; hop <= MAX_LOCK_OWNER_HOPS && threadId != -1L && dumped.add(threadId); ++hop) {
++            final ThreadInfo info = threads.getThreadInfo(
++                new long[] { threadId }, threads.isObjectMonitorUsageSupported(), threads.isSynchronizerUsageSupported(), Integer.MAX_VALUE
++            )[0];
++            if (info == null) {
++                break;
++            }
++            dumpThreadInfo(info, hop == 0 ? "Region thread" : "Owner of the awaited lock", contains(deadlocked, threadId));
++            threadId = info.getLockOwnerId();
++        }
++    }
++
++    private static void dumpThreadInfo(final ThreadInfo info, final String role, final boolean deadlocked) {
++        LOGGER.error("------------------------------");
++        LOGGER.error(role + ": " + info.getThreadName() + " | id: " + info.getThreadId() + " | state: " + info.getThreadState()
++            + (info.isInNative() ? " | in native code" : "") + (deadlocked ? " | DEADLOCKED" : ""));
++        if (info.getLockName() != null) {
++            LOGGER.error("	Waiting for: " + info.getLockName()
++                + (info.getLockOwnerName() != null ? " held by " + info.getLockOwnerName() + " (id " + info.getLockOwnerId() + ")" : ""));
++        }
++        LOGGER.error("	Stack:");
++        final StackTraceElement[] stack = info.getStackTrace();
++        final MonitorInfo[] monitors = info.getLockedMonitors();
++        for (int i = 0; i < stack.length; ++i) {
++            LOGGER.error("		" + stack[i]);
++            for (final MonitorInfo monitor : monitors) {
++                if (monitor.getLockedStackDepth() == i) {
++                    LOGGER.error("			- locked " + monitor);
++                }
++            }
++        }
++        final LockInfo[] synchronizers = info.getLockedSynchronizers();
++        if (synchronizers.length != 0) {
++            LOGGER.error("	Held locks:");
++            for (final LockInfo lock : synchronizers) {
++                LOGGER.error("		- " + lock);
++            }
++        }
++    }
++
++    private static boolean contains(final long[] ids, final long id) {
++        if (ids != null) {
++            for (final long other : ids) {
++                if (other == id) {
++                    return true;
++                }
++            }
++        }
++        return false;
++    }
++    // Tessera end - detailed watchdog report
++
+     public void addTick(final RunningTick tick) {
+         synchronized (this.ticks) {
+             this.ticks.add(tick);
