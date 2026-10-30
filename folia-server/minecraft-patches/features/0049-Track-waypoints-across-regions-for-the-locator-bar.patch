@@ -1,0 +1,251 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 11:02:15 +0300
+Subject: [PATCH] Track waypoints across regions for the locator bar
+
+Folia left the waypoint manager empty, so the locator bar never showed
+anything. Keep the waypoints and receiving players of a world in
+concurrent sets and let every receiver poll them on its own thread each
+tick: it connects, updates and drops its connections the same way the
+vanilla manager does when a waypoint or the player moves. Connections
+live on the receiving player, so no shared table is touched from
+several regions. A changed icon bumps the waypoint version, which makes
+receivers remake the connection; turning the locator bar off drops the
+connections on the receivers' next tick.
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 56621e509a6ec542f918ab0c57b37128d1332fc5..82489277909b5ea277754b4ba1fe90778aa50539 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -1012,6 +1012,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                     this.synchronizeSpecialItemUpdates(itemStack);
+                 }
+             }
++            this.level().getWaypointManager().tickReceiver(this); // Tessera - region threaded waypoints
+ 
+             if (this.getHealth() != this.lastSentHealth
+                 || this.lastSentFood != this.foodData.getFoodLevel()
+@@ -1086,6 +1087,8 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         }
+     }
+ 
++    public final java.util.Map<net.minecraft.world.waypoints.WaypointTransmitter, ServerWaypointManager.ReceiverConnection> tesseraWaypointConnections = new java.util.HashMap<>(); // Tessera - region threaded waypoints
++
+     private void synchronizeSpecialItemUpdates(final ItemStack itemStack) {
+         MapId mapId = itemStack.get(DataComponents.MAP_ID);
+         MapItemSavedData data = MapItem.getSavedData(mapId, this.level());
+diff --git a/net/minecraft/server/waypoints/ServerWaypointManager.java b/net/minecraft/server/waypoints/ServerWaypointManager.java
+index b455050c16946f54fc1d9893173777e39baf4290..5679df55f2f8a6e233bf39d3d9af40f6332670b7 100644
+--- a/net/minecraft/server/waypoints/ServerWaypointManager.java
++++ b/net/minecraft/server/waypoints/ServerWaypointManager.java
+@@ -1,127 +1,141 @@
+ package net.minecraft.server.waypoints;
+ 
+-import com.google.common.collect.HashBasedTable;
+-import com.google.common.collect.ImmutableSet;
+-import com.google.common.collect.Sets;
+-import com.google.common.collect.Table;
+-import com.google.common.collect.Tables;
+-import com.google.common.collect.Sets.SetView;
+-import java.util.HashSet;
++import java.util.Iterator;
+ import java.util.Map;
+ import java.util.Set;
+-import java.util.Map.Entry;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.atomic.AtomicInteger;
+ import net.minecraft.server.level.ServerPlayer;
++import net.minecraft.world.entity.Entity;
+ import net.minecraft.world.level.gamerules.GameRules;
+ import net.minecraft.world.waypoints.WaypointManager;
+ import net.minecraft.world.waypoints.WaypointTransmitter;
+ 
++// Tessera start - region threaded waypoints
++// Connections belong to the receiving player and are only touched on its thread: every tick the receiver walks the
++// waypoints of its world and connects, updates or drops them, like vanilla does when a waypoint or the player moves.
++// Waypoint and player sets are shared between regions and only hold membership.
+ public class ServerWaypointManager implements WaypointManager<WaypointTransmitter> {
+-    private final Set<WaypointTransmitter> waypoints = new HashSet<>();
+-    private final Set<ServerPlayer> players = new HashSet<>();
+-    private final Table<ServerPlayer, WaypointTransmitter, WaypointTransmitter.Connection> connections = HashBasedTable.create();
++    // value: version of the waypoint, bumped on every track so receivers remake connections (icon changes)
++    private final Map<WaypointTransmitter, Integer> waypoints = new ConcurrentHashMap<>();
++    private final Set<ServerPlayer> players = ConcurrentHashMap.newKeySet();
++    private final AtomicInteger versions = new AtomicInteger();
++    private final net.minecraft.server.level.ServerLevel level;
+     // Paper start - optimize ServerWaypointManager with locator bar disabled
+-    public boolean locatorBarEnabled; // Avoid a gamerule lookup for each player
++    public volatile boolean locatorBarEnabled; // Avoid a gamerule lookup for each player
+ 
+     public ServerWaypointManager(net.minecraft.server.level.ServerLevel serverLevel) {
++        this.level = serverLevel;
+         this.locatorBarEnabled = serverLevel.getGameRules().get(GameRules.LOCATOR_BAR);
+     }
+     // Paper end - optimize ServerWaypointManager with locator bar disabled
+ 
++    public static final class ReceiverConnection {
++        final WaypointTransmitter.Connection connection;
++        final int version;
++
++        ReceiverConnection(final WaypointTransmitter.Connection connection, final int version) {
++            this.connection = connection;
++            this.version = version;
++        }
++    }
++
+     @Override
+     public void trackWaypoint(final WaypointTransmitter waypoint) {
+-        // Folia - region threading
++        this.waypoints.put(waypoint, this.versions.incrementAndGet());
+     }
+ 
+     @Override
+     public void updateWaypoint(final WaypointTransmitter waypoint) {
+-        if (!this.locatorBarEnabled) return; // Paper - optimize ServerWaypointManager with locator bar disabled
+-        if (this.waypoints.contains(waypoint)) {
+-            Map<ServerPlayer, WaypointTransmitter.Connection> playerConnection = Tables.transpose(this.connections).row(waypoint);
+-            SetView<ServerPlayer> potentialPlayers = Sets.difference(this.players, playerConnection.keySet());
+-
+-            for (Entry<ServerPlayer, WaypointTransmitter.Connection> waypointConnection : ImmutableSet.copyOf(playerConnection.entrySet())) {
+-                this.updateConnection(waypointConnection.getKey(), waypoint, waypointConnection.getValue());
+-            }
+-
+-            for (ServerPlayer player : potentialPlayers) {
+-                this.createConnection(player, waypoint);
+-            }
+-        }
++        // receivers poll their connections every tick
+     }
+ 
+     @Override
+     public void untrackWaypoint(final WaypointTransmitter waypoint) {
+-        this.connections.column(waypoint).forEach((player, connection) -> connection.disconnect());
+-        Tables.transpose(this.connections).row(waypoint).clear();
+         this.waypoints.remove(waypoint);
+     }
+ 
+     public void addPlayer(final ServerPlayer player) {
+-        // Folia - region threading
++        this.players.add(player);
+     }
+ 
+     public void updatePlayer(final ServerPlayer player) {
+-        // Folia - region threading
++        // receivers poll their connections every tick
+     }
+ 
+     public void removePlayer(final ServerPlayer player) {
+-        // Folia - region threading
++        this.players.remove(player);
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player)) {
++            this.disconnectAll(player);
++        } // else: dropped on the player's next tick
+     }
+ 
+     public void breakAllConnections() {
+-        this.connections.values().forEach(WaypointTransmitter.Connection::disconnect);
+-        this.connections.clear();
++        // receivers drop their connections on their next tick once the locator bar is off
+     }
+ 
+     public void remakeConnections(final WaypointTransmitter waypoint) {
+-        if (!this.locatorBarEnabled) return; // Paper - optimize ServerWaypointManager with locator bar disabled
+-        for (ServerPlayer player : this.players) {
+-            this.createConnection(player, waypoint);
++        if (this.waypoints.containsKey(waypoint)) {
++            this.trackWaypoint(waypoint);
+         }
+     }
+ 
+     public Set<WaypointTransmitter> transmitters() {
+-        return this.waypoints;
++        return this.waypoints.keySet();
+     }
+ 
+-    // Paper start - optimize ServerWaypointManager with locator bar disabled
+-    // Avoid a gamerule lookup for each player
+-    private boolean isLocatorBarEnabledFor(final ServerPlayer player) {
+-        return locatorBarEnabled;
+-    // Paper end - optimize ServerWaypointManager with locator bar disabled
++    private void disconnectAll(final ServerPlayer receiver) {
++        Map<WaypointTransmitter, ReceiverConnection> connections = receiver.tesseraWaypointConnections;
++        if (connections.isEmpty()) {
++            return;
++        }
++        for (ReceiverConnection connection : connections.values()) {
++            connection.connection.disconnect();
++        }
++        connections.clear();
++    }
++
++    private static boolean isGone(final WaypointTransmitter waypoint, final ServerPlayer receiver) {
++        return waypoint instanceof Entity entity && (entity.isRemoved() || entity.level() != receiver.level());
+     }
+ 
+-    private void createConnection(final ServerPlayer player, final WaypointTransmitter waypoint) {
+-        if (player != waypoint) {
+-            if (isLocatorBarEnabledFor(player)) {
+-                waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(connection -> {
+-                    this.connections.put(player, waypoint, connection);
+-                    connection.connect();
+-                }, () -> {
+-                    WaypointTransmitter.Connection connection = this.connections.remove(player, waypoint);
+-                    if (connection != null) {
+-                        connection.disconnect();
+-                    }
+-                });
++    // called on the receiver's thread every tick
++    public void tickReceiver(final ServerPlayer receiver) {
++        Map<WaypointTransmitter, ReceiverConnection> connections = receiver.tesseraWaypointConnections;
++        if (!this.locatorBarEnabled || !this.players.contains(receiver) || receiver.level() != this.level) {
++            this.disconnectAll(receiver);
++            return;
++        }
++
++        for (Iterator<Map.Entry<WaypointTransmitter, ReceiverConnection>> iterator = connections.entrySet().iterator(); iterator.hasNext();) {
++            Map.Entry<WaypointTransmitter, ReceiverConnection> entry = iterator.next();
++            Integer version = this.waypoints.get(entry.getKey());
++            if (version == null || version.intValue() != entry.getValue().version || isGone(entry.getKey(), receiver)) {
++                entry.getValue().connection.disconnect();
++                iterator.remove();
+             }
+         }
+-    }
+ 
+-    private void updateConnection(final ServerPlayer player, final WaypointTransmitter waypoint, final WaypointTransmitter.Connection connection) {
+-        if (player != waypoint) {
+-            if (isLocatorBarEnabledFor(player)) {
+-                if (!connection.isBroken()) {
+-                    connection.update();
+-                } else {
+-                    waypoint.makeWaypointConnectionWith(player).ifPresentOrElse(newConnection -> {
+-                        newConnection.connect();
+-                        this.connections.put(player, waypoint, newConnection);
+-                    }, () -> {
+-                        connection.disconnect();
+-                        this.connections.remove(player, waypoint);
+-                    });
+-                }
++        for (Map.Entry<WaypointTransmitter, Integer> entry : this.waypoints.entrySet()) {
++            WaypointTransmitter waypoint = entry.getKey();
++            if (waypoint == receiver || isGone(waypoint, receiver)) {
++                continue;
++            }
++            ReceiverConnection existing = connections.get(waypoint);
++            if (existing != null && !existing.connection.isBroken()) {
++                existing.connection.update();
++                continue;
++            }
++            // new or broken connection: (re)make it, as vanilla createConnection / updateConnection do
++            java.util.Optional<WaypointTransmitter.Connection> made = waypoint.makeWaypointConnectionWith(receiver);
++            if (made.isPresent()) {
++                made.get().connect();
++                connections.put(waypoint, new ReceiverConnection(made.get(), entry.getValue().intValue()));
++            } else if (existing != null) {
++                existing.connection.disconnect();
++                connections.remove(waypoint);
+             }
+         }
+     }
+ }
++// Tessera end - region threaded waypoints
