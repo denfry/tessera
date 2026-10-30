@@ -1,0 +1,135 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:59:26 +0300
+Subject: [PATCH] Call respawn events in the region threaded respawn
+
+The region threaded respawn never called PlayerRespawnEvent or
+PlayerPostRespawnEvent, after death or when leaving the end. Read the
+respawn block on the region that owns it, call PlayerRespawnEvent there
+with the bed, anchor and missing block flags, and respawn at the
+location the listeners chose. The anchor charge is only used when the
+location was not changed. PlayerPostRespawnEvent is called once the
+player is placed.
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 396247a72dd94abde2a64c7492ad7a23fb83067c..1f3d02f4956b32065a1c638f75de2d3fbf5ea5aa 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -1763,6 +1763,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         ca.spottedleaf.concurrentutil.completable.CallbackCompletable<org.bukkit.Location> spawnPosComplete =
+             new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
+         boolean[] usedRespawnAnchor = new boolean[1];
++        // Tessera start - respawn events
++        // bed spawn, anchor spawn, missing respawn block, anchor charge to consume
++        boolean[] respawnFlags = new boolean[4];
++        ca.spottedleaf.concurrentutil.completable.CallbackCompletable<org.bukkit.Location> foundSpawn =
++            new ca.spottedleaf.concurrentutil.completable.CallbackCompletable<>();
++        // Tessera end - respawn events
+ 
+         // set up post spawn location logic
+         spawnPosComplete.addWaiter((spawnLoc, throwable) -> {
+@@ -1794,6 +1800,9 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                     }
+                     ServerPlayer.this.connection.restartClientLoadTimerAfterRespawn();
+                     // now the respawn logic is complete
++                    new com.destroystokyo.paper.event.player.PlayerPostRespawnEvent( // Tessera - respawn events
++                        ServerPlayer.this.getBukkitEntity(), spawnLoc.clone(), respawnFlags[0], respawnFlags[1], respawnFlags[2], reason // Tessera - respawn events
++                    ).callEvent(); // Tessera - respawn events
+ 
+                     // last, call the function callback
+                     if (respawnComplete != null) {
+@@ -1803,17 +1812,49 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+             );
+         });
+ 
++        // Tessera start - respawn events
++        foundSpawn.addWaiter((foundLoc, throwable) -> {
++            // listeners expect a tick thread, call them on the region that owns the spawn
++            io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                ((org.bukkit.craftbukkit.CraftWorld)foundLoc.getWorld()).getHandle(), foundLoc.getBlockX() >> 4, foundLoc.getBlockZ() >> 4, () -> {
++                    org.bukkit.event.player.PlayerRespawnEvent respawnEvent = new org.bukkit.event.player.PlayerRespawnEvent(
++                        ServerPlayer.this.getBukkitEntity(), foundLoc.clone(), respawnFlags[0], respawnFlags[1], respawnFlags[2], reason
++                    );
++                    respawnEvent.callEvent();
++                    org.bukkit.Location respawnLoc = respawnEvent.getRespawnLocation();
++                    if (!respawnLoc.equals(foundLoc)) {
++                        // a listener moved the respawn, the anchor is not used
++                        usedRespawnAnchor[0] = false;
++                    } else if (respawnFlags[3]) {
++                        // consume the anchor charge, on the region that owns the anchor
++                        final BlockPos anchorPos = respawnConfig.respawnData.pos();
++                        io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                            respawnWorld, anchorPos.getX() >> 4, anchorPos.getZ() >> 4, () -> {
++                                final BlockState anchorState = respawnWorld.getBlockState(anchorPos);
++                                if (anchorState.getBlock() instanceof RespawnAnchorBlock && anchorState.getValue(RespawnAnchorBlock.CHARGE) > 0) {
++                                    respawnWorld.setBlockAndUpdate(anchorPos, anchorState.setValue(RespawnAnchorBlock.CHARGE, anchorState.getValue(RespawnAnchorBlock.CHARGE) - 1));
++                                }
++                            }
++                        );
++                    }
++                    spawnPosComplete.complete(respawnLoc);
++                }
++            );
++        });
++        // Tessera end - respawn events
++
+         // find and modify respawn block state
+         if (respawnWorld == null || respawnConfig == null) {
+             // default to regular spawn
+-            fudgeSpawnLocation(this.server.getLevel(Level.OVERWORLD), spawnPosComplete);
++            fudgeSpawnLocation(this.server.getLevel(Level.OVERWORLD), foundSpawn); // Tessera - respawn events
+         } else {
+             // load chunk for block
+             // give at least 1 radius of loaded chunks so that we do not sync load anything
+             int radiusBlocks = 16;
+             respawnWorld.moonrise$loadChunksAsync(respawnConfig.respawnData.pos(), radiusBlocks,
+                 ca.spottedleaf.concurrentutil.util.Priority.HIGHER,
+-                (chunks) -> {
++                (chunks) -> io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue( // Tessera - respawn events - read the spawn block on its region
++                    respawnWorld, respawnConfig.respawnData.pos().getX() >> 4, respawnConfig.respawnData.pos().getZ() >> 4, () -> { // Tessera - respawn events
+                     ServerPlayer.RespawnPosAngle spawnPos = ServerPlayer.findRespawnAndUseSpawnBlock(
+                         respawnWorld, respawnConfig, !alive
+                     ).orElse(null);
+@@ -1826,33 +1867,26 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                             null, false, com.destroystokyo.paper.event.player.PlayerSetSpawnEvent.Cause.PLAYER_RESPAWN
+                         );
+                         // default to regular spawn
+-                        fudgeSpawnLocation(this.server.getLevel(Level.OVERWORLD), spawnPosComplete);
++                        respawnFlags[2] = true; // Tessera - respawn events
++                        fudgeSpawnLocation(this.server.getLevel(Level.OVERWORLD), foundSpawn); // Tessera - respawn events
+                         return;
+                     }
+ 
+                     boolean isRespawnAnchor = respawnWorld.getBlockState(respawnConfig.respawnData.pos()).is(net.minecraft.world.level.block.Blocks.RESPAWN_ANCHOR);
+                     boolean isBed = respawnWorld.getBlockState(respawnConfig.respawnData.pos()).is(net.minecraft.tags.BlockTags.BEDS);
+                     usedRespawnAnchor[0] = !alive && isRespawnAnchor;
+-                    // Tessera start - consume the anchor charge, on the region that owns the anchor
+-                    if (usedRespawnAnchor[0] && spawnPos.consumeAnchorCharge() != null) {
+-                        final BlockPos anchorPos = respawnConfig.respawnData.pos();
+-                        io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
+-                            respawnWorld, anchorPos.getX() >> 4, anchorPos.getZ() >> 4, () -> {
+-                                final BlockState anchorState = respawnWorld.getBlockState(anchorPos);
+-                                if (anchorState.getBlock() instanceof RespawnAnchorBlock && anchorState.getValue(RespawnAnchorBlock.CHARGE) > 0) {
+-                                    respawnWorld.setBlockAndUpdate(anchorPos, anchorState.setValue(RespawnAnchorBlock.CHARGE, anchorState.getValue(RespawnAnchorBlock.CHARGE) - 1));
+-                                }
+-                            }
+-                        );
+-                    }
+-                    // Tessera end - consume the anchor charge, on the region that owns the anchor
++                    // Tessera start - respawn events
++                    respawnFlags[0] = spawnPos.isBedSpawn();
++                    respawnFlags[1] = spawnPos.isAnchorSpawn();
++                    respawnFlags[3] = usedRespawnAnchor[0] && spawnPos.consumeAnchorCharge() != null;
++                    // Tessera end - respawn events
+ 
+                     // finished now, pass the location on
+-                    spawnPosComplete.complete(
++                    foundSpawn.complete( // Tessera - respawn events
+                         io.papermc.paper.util.MCUtil.toLocation(respawnWorld, spawnPos.position(), spawnPos.yaw(), 0.0f)
+                     );
+                     return;
+-                }
++                }) // Tessera - respawn events
+             );
+         }
+     }
