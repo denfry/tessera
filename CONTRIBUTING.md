@@ -95,6 +95,16 @@ Before opening a pull request:
 - For performance patches, attach [spark](https://spark.lucko.me/) profiles from before and after.
 - Watch the console for region-ownership errors and watchdog warnings while testing.
 
+## Coding agents and AI-assisted changes
+
+Changes written with an AI coding agent are accepted on the same terms as any other. Agents should follow
+[AGENTS.md](AGENTS.md) (the same workflow, plus the test harness in `tools/`). The person opening the pull request is
+responsible for it:
+
+- the patch was built and run, and the PR says what was tested and what was not;
+- you can explain every changed line; unexplained or unverified changes are closed;
+- the description states facts from the test run, not what the change is expected to do.
+
 ## Upstream merges
 
 ```bash

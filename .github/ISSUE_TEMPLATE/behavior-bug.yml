@@ -1,5 +1,5 @@
 name: Behavior Bug
-description: Report behavior related issues, where Tessera does not work like vanilla. Paper and Bukkit plugins are not guaranteed to work on Tessera. Do not submit bug reports for plugin issues here.
+description: Report behavior related issues, where Tessera does not work like vanilla. If a plugin does not work on Tessera, use the Plugin compatibility form instead.
 labels: [ "status: needs triage", "type: bug" ]
 body:
   - type: textarea

@@ -28,4 +28,5 @@ in the meantime.
 
 ## Supported versions
 
-Only the latest build for the current Minecraft version (26.3) receives fixes.
+Only the latest stable build (marked "Latest" on the [Releases](https://github.com/denfry/tessera/releases) page) for the
+current Minecraft version (26.3) receives fixes.

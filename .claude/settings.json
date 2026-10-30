@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew applyAllPatches)",
+      "Bash(./gradlew createPaperclipJar)",
+      "Bash(./gradlew :folia-server:compileJava)",
+      "Bash(./gradlew rebuildMinecraftPatches)",
+      "Bash(./gradlew rebuildPaperServerPatches)",
+      "Bash(./gradlew rebuildServerPatches)",
+      "Bash(./gradlew rebuildPaperPatches)",
+      "Bash(./rb.sh)",
+      "Bash(tools/testserver.sh:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)"
+    ]
+  }
+}

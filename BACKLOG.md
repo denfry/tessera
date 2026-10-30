@@ -10,35 +10,18 @@ and convenience, **P3** someday.
 
 ## How to take a task (read it in full before starting)
 
-1. **Where the code is.** First run `./gradlew applyAllPatches`. Minecraft sources with Folia patches are in
-   `folia-server/src/minecraft/java` (a separate git repository), Paper server sources are in `paper-server`, the API is in
-   `paper-api`. Changes are committed **inside these repositories**, one commit per change. Then `./rb.sh`
-   rebuilds the `.patch` files in `folia-server/minecraft-patches/features`, `folia-server/paper-patches/features` and
-   `folia-api/paper-patches`. paperweight assigns patch numbers itself.
-2. **Code search.** First `codebase-index search "<query>" --compact` / `refs` / `impact` from the repository root, Grep is the fallback.
-3. **Style.**
-   - Changed lines are marked `// Tessera - <why>`, blocks `// Tessera start - ...` / `// Tessera end - ...`.
-   - Touch as few upstream lines as possible.
-   - Behaviour that changes gameplay goes behind a config option, vanilla by default.
-   - The working tree uses CRLF: if `git apply` does not apply, edit with a script that accounts for `\r\n`.
-4. **Commits.**
-   - Author strictly `git -c user.name=denfry -c user.email=dabinayo@pm.me commit`.
-   - Messages in the nested repositories are in English, Paper style: title, a "why" paragraph, then `Fixes PaperMC/Folia#N` and,
-     if the code comes from someone else's PR, `Based on PaperMC/Folia#N (author)`.
-   - In the tessera repository, in Russian: `fix: ...`, `feat: ...`.
-   - No AI attribution (Co-Authored-By, "Generated with", mentions of Claude/AI) anywhere.
-   - Do not push without explicit permission.
-5. **Testing.**
-   - Build: `./gradlew :folia-server:compileJava`, then `./gradlew createPaperclipJar`; the jar is `folia-server/build/libs/folia-paperclip-*.jar`.
-   - Run a test server on **JDK 25** (`~/.jdks/azul-25/bin/java`) in a separate folder. In `server.properties`: `online-mode=false`,
-     `white-list=false`, a unique port.
-   - For player joins there is `tools/joinbot.py <port> <name> <seconds online> [extra finish_configuration]`, a minimal
-     26.3 client (protocol 777): login, configuration, joining the game, keep-alive replies.
-   - If behaviour is checked through a plugin, write a small test plugin (`folia-supported: true`) and build it with
-     `javac` against the jar from `<server>/libraries`.
-   - The log must have no new `ERROR` / `Exception`.
-6. **After.** A line in PATCHES.md, move the item here to "Done".
-7. **Plugins.** Every third-party plugin run on Tessera is recorded in [PLUGINS.md](PLUGINS.md) (status, version,
+The workflow, code rules and test harness are in [AGENTS.md](AGENTS.md); patch rules and headers in
+[CONTRIBUTING.md](CONTRIBUTING.md). For a task from this list:
+
+1. **Reproduce first.** Check that the problem still happens on the current build. If it does not, write "Not
+   reproducible on 26.3" with what was checked and move the item to "Done".
+2. **Patches.** One patch per fix. Commit messages in the nested repositories are in English, Paper style: title, a "why"
+   paragraph, then `Fixes PaperMC/Folia#N` and, if the code comes from someone else's PR, `Based on PaperMC/Folia#N (author)`.
+3. **Testing.** Reproduce on the old build and confirm the fix on the new one with `tools/testserver.sh`, bots
+   (`tools/joinbot.py`) and, where the Bukkit API is involved, a small test plugin. The log must have no new `ERROR` or
+   exception. Say what needs a real client and was not checked.
+4. **After.** A row in PATCHES.md, the item moves to "Done".
+5. **Plugins.** Every third-party plugin run on Tessera is recorded in [PLUGINS.md](PLUGINS.md) (status, version,
    Tessera build, what is broken). Public plugins only.
 
 ---

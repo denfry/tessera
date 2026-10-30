@@ -1,0 +1,80 @@
+name: Plugin compatibility
+description: Ask for a plugin to work on Tessera, or report a plugin that fails on it
+labels: [ "status: needs triage", "type: plugin" ]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Plugins that are already checked are listed in [PLUGINS.md](https://github.com/denfry/tessera/blob/main/PLUGINS.md).
+        Plugins without `folia-supported: true` can run in compatibility mode: add them to `compat.plugins` in
+        `config/tessera.yml` ([COMPAT.md](https://github.com/denfry/tessera/blob/main/COMPAT.md)). Please try that first
+        and attach the `/tessera compat` output below.
+
+  - type: input
+    attributes:
+      label: Plugin
+      description: Name and a link to its Modrinth, Hangar, SpigotMC or GitHub page.
+      placeholder: EssentialsX — https://modrinth.com/plugin/essentialsx
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Plugin version
+      description: The exact version of the jar you run.
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: Does the jar declare Folia support?
+      description: "`folia-supported: true` in plugin.yml or paper-plugin.yml."
+      options:
+        - "No"
+        - "Yes"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: Compatibility mode
+      description: Did you try the plugin in compatibility mode (`compat.plugins` in `config/tessera.yml`)?
+      options:
+        - Tried, it does not work or works partly
+        - Not tried
+        - The plugin declares Folia support, compatibility mode does not apply
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: What does not work
+      description: Commands, features or events that fail, and what you expected. "Does not load" is fine too.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Errors and /tessera compat output
+      description: |
+        Errors from the log (full stack traces) and, for compatibility mode, the output of `/tessera compat <plugin>`.
+        Use a paste site such as https://mclo.gs for long logs.
+      render: shell
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: Tessera version
+      description: Run `/version` in the console and paste the full output.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Other plugins
+      description: All plugins on the server (`/plugins`).
+    validations:
+      required: false

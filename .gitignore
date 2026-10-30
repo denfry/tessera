@@ -18,8 +18,14 @@ build
 
 .idea/
 
-# server-specific backlog, not for the public repo
+# server-specific backlog and personal agent instructions, not for the public repo
 /BACKLOG.local.md
+/CLAUDE.local.md
+/AGENTS.local.md
+
+# local agent state (shared settings in .claude/settings.json are tracked)
+/.claude/*
+!/.claude/settings.json
 
 # Python bytecode from tools/
 __pycache__/

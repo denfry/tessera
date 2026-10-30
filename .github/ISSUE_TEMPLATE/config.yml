@@ -3,6 +3,9 @@ contact_links:
   - name: Security vulnerability or exploit
     url: https://github.com/denfry/tessera/security/advisories/new
     about: Report dupes, crash exploits and other security problems privately. Do not open a public issue for them.
+  - name: Questions and help
+    url: https://github.com/denfry/tessera/discussions
+    about: Setup, configuration and "how do I" questions.
   - name: Bug in upstream Folia
     url: https://github.com/PaperMC/Folia/issues
     about: If the problem also happens on stock Folia, report it to PaperMC/Folia instead.

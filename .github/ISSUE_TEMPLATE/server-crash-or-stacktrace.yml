@@ -1,6 +1,6 @@
 name: Server crash or Stacktrace
 description: Report server crashes or scary stacktraces
-labels: [ "status: needs triage" ]
+labels: [ "status: needs triage", "type: crash" ]
 body:
   - type: textarea
     attributes:
