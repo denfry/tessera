@@ -125,10 +125,10 @@ index e9d9ae5f64cbb717fbca54009855c7ec25c70345..fcab79e37046ae1a6d3d0a9040d04c79
          if (HELD.isEmpty()) {
              return;
 diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
-index a6ab9cb01f4f49f5f44b6ed324fa6d51139aabb6..81e61e9eaaf67328ca4c032b1f1019a03a145b06 100644
+index bce53f9c03dd81391e5964e46d55f094803efa3e..ac44f1e797eb47229b5cdf4f7752094b39e650f1 100644
 --- a/io/papermc/paper/threadedregions/TickRegions.java
 +++ b/io/papermc/paper/threadedregions/TickRegions.java
-@@ -459,7 +459,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+@@ -460,7 +460,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
  
          @Override
          protected boolean tryMarkTicking() {
