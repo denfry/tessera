@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 11:05:34 +0300
+Subject: [PATCH] Show plugins in compatibility mode only the entities of their
+ region
+
+A plugin in compatibility mode does not know about regions: an event
+handler on a region thread that walks World#getEntities touches entities
+of other regions and fails the thread check for each of them (LevelledMobs
+updating nametags on PlayerTeleportEvent). On a region thread, entity
+lists of the world returned to such a plugin hold only the entities owned
+by the current region. Plugins marked as Folia supported and the global
+thread see every entity, as before.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+index c1540cd5424c9476784ebc4a00aa4b60d2d384a0..563a8340eed0e697f1c12c3c1a89d40fb8e845ea 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -972,7 +972,20 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+ 
+     @Override
+     public Iterable<net.minecraft.world.entity.Entity> getNMSEntities() {
+-        return this.getHandle().getEntities().getAll();
++        // Tessera start - plugins in compatibility mode only see the entities of their region on a region thread
++        final Iterable<net.minecraft.world.entity.Entity> all = this.getHandle().getEntities().getAll();
++        if (io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion() != null
++            && io.papermc.paper.threadedregions.TesseraCompat.calledByCompatPlugin()) {
++            final List<net.minecraft.world.entity.Entity> owned = new ArrayList<>();
++            for (final net.minecraft.world.entity.Entity entity : all) {
++                if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
++                    owned.add(entity);
++                }
++            }
++            return owned;
++        }
++        return all;
++        // Tessera end - plugins in compatibility mode only see the entities of their region on a region thread
+     }
+ 
+     @Override
