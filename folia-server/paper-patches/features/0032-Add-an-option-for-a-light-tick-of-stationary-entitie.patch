@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 13:24:11 +0300
+Subject: [PATCH] Add an option for a light tick of stationary entities
+
+Adds performance.light-entities and performance.light-entity-tracker-interval to config/tessera.yml. The default keeps vanilla behaviour.
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index 3beb147478b255ddb8414259646f424d5342bbab..3a485016d309430e1618c197f8c785a1fed1b787 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -49,11 +49,19 @@ public final class TesseraCompat {
+           # Villagers looking for a job site, bed or meeting point read POI data from disk when it is not
+           # loaded, which stalls the region. false searches loaded chunks only.
+           poi-searches-load-chunks: true
++          # Armor stands that are markers or have no gravity run a full tick once a second, or every tick while
++          # burning, riding, carrying a passenger, in a portal or under an effect. Viewers of these stands and of
++          # display entities are recomputed every light-entity-tracker-interval ticks, so they appear and
++          # disappear that much later.
++          light-entities: false
++          light-entity-tracker-interval: 5
+         """;
+ 
+     private static volatile Set<String> plugins = Set.of();
+     private static volatile boolean allPlugins;
+     private static volatile boolean poiSearchesLoadChunks = true;
++    private static volatile boolean lightEntities;
++    private static volatile int lightEntityTrackerInterval = 1;
+ 
+     private TesseraCompat() {
+     }
+@@ -89,6 +97,12 @@ public final class TesseraCompat {
+             allPlugins = all;
+             poiSearchesLoadChunks = !(root instanceof Map<?, ?> rootMap && rootMap.get("performance") instanceof Map<?, ?> performance
+                 && Boolean.FALSE.equals(performance.get("poi-searches-load-chunks")));
++            final boolean light = root instanceof Map<?, ?> rootMap && rootMap.get("performance") instanceof Map<?, ?> performance
++                && Boolean.TRUE.equals(performance.get("light-entities"));
++            lightEntities = light;
++            lightEntityTrackerInterval = !light ? 1
++                : root instanceof Map<?, ?> rootMap && rootMap.get("performance") instanceof Map<?, ?> performance
++                    && performance.get("light-entity-tracker-interval") instanceof Number interval ? Math.max(1, interval.intValue()) : 5;
+         } catch (final IOException | YAMLException ex) {
+             LOGGER.error("Could not read {}, compatibility mode is off", file, ex);
+         }
+@@ -101,6 +115,14 @@ public final class TesseraCompat {
+         return poiSearchesLoadChunks;
+     }
+ 
++    public static boolean lightEntities() {
++        return lightEntities;
++    }
++
++    public static int lightEntityTrackerInterval() {
++        return lightEntityTrackerInterval;
++    }
++
+     /**
+      * Returns whether any plugin may run in compatibility mode.
+      */

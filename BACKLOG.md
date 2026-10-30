@@ -76,15 +76,6 @@ Rest of the item about minor races (the rest is in "Done").
 
 ## P2 — performance
 
-### T-040 Lightweight tick for `text_display`, `item_display`, `block_display`, stationary `armor_stand`
-- **Why.** The main spawn has 391 such entities (holograms, NPCs), they are ticked and tracked like regular ones.
-- **What.**
-  - Display entities without interpolation and passengers do not tick physics.
-  - `ArmorStand` with `setMarker(true)` or without gravity does not check collisions.
-  - The tracker recomputes their visibility less often.
-  - All behind a config option.
-- **Testing.** 2000 holograms near a bot, compare region MSPT before and after.
-
 ### T-041 Asynchronous entity tracker
 - **What.** Move the computation of who sees whom (`ChunkMap.TrackedEntity#updatePlayer`) to a thread pool, then
   apply on the region thread. This addresses the "all players in one region" case (O(P·E) complexity).
@@ -298,3 +289,4 @@ Folia regions are already isolated, the next step is spreading them across proce
 | Villager behaviours do not wait for POI data on the region thread: `PoiCompetitorScan`, `AssignProfessionFromJobSite`, `YieldJobSite` and `ValidateNearbyPoi` skip the tick when the POI chunk is not loaded and keep the memory. `performance.poi-searches-load-chunks` in `config/tessera.yml` (default `true`, vanilla) keeps the `AcquirePoi` search off the disk. Checked: 4 villagers took 4 lecterns in both modes, no errors. The stall itself was not measured, T-031 | #292 | 0059 / paper 0030 |
 | Lock contention: no hot monitor found, no patch. JFR with thresholds of 1 ms, 50 idle bots in about 40 regions, 6 region threads, 2 minutes: 0.07 s in monitors on region threads, 2.7 s in `ThreadedTicketLevelPropagator.await`, 0.4 s in `ThreadedRegionizer` and the rest is the scheduler waiting for work. Not covered: bots do not build or fight and no plugins were loaded, so re-check on a live profile, T-032 | #291 | — |
 | Compatibility-mode plugins can use the world in `onEnable`: the startup thread counts as the global tick and borrows regions until `RegionizedServer#init`. Multiverse-Core 5.8.2 loads its config and worlds, `mv tp` to the default and a second world works after a restart, T-108 | — | 0060 / paper 0031 |
+| Light tick behind `performance.light-entities` (default `false`): marker and gravity-less armor stands run a full tick once a second, or every tick while burning, riding, carrying a passenger, in a portal or under an effect; viewers of these stands and of display entities are recomputed every `light-entity-tracker-interval` ticks (default 5). Display entities have no server physics to skip. 2000 entities near one bot, region MSPT off/on: marker 9.2/4.0, gravity-less stand 7.0/3.9, display about 3.9/3.5 (within noise), regular stand unchanged. Fire damage, effect expiry and viewer removal after a teleport match with the option off. Not tested: a real client (late appearance is at most interval - 1 ticks), equipment updates reaching a viewer, several viewers, portals, T-040 | — | 0061 / paper 0032 |

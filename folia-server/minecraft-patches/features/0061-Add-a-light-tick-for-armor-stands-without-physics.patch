@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 13:24:09 +0300
+Subject: [PATCH] Add a light tick for armor stands without physics
+
+Marker and gravity-less armor stands spent most of their cost in LivingEntity#tick although they do not move, and the tracker recomputed the viewers of them and of display entities every tick. With performance.light-entities in config/tessera.yml (default false) these stands run a full tick once a second, or every tick while something needs it, and viewers of stationary stands and display entities are recomputed every light-entity-tracker-interval ticks.
+
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index f5601ee683c9daef74ab34c96b70d990ac6cf534..71c700ef3bb42dd675c33051994fe12f27e57ef1 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -1098,6 +1098,18 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+         worldData.iteratingTrackerEntities = false; // Folia - region threading
+     }
+ 
++    // Tessera start - update the viewers of stationary entities less often
++    private boolean skipTrackerUpdate(final Entity entity) {
++        final int interval = io.papermc.paper.threadedregions.TesseraCompat.lightEntityTrackerInterval();
++        if (interval <= 1 || (io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick() + entity.getId()) % interval == 0) {
++            return false;
++        }
++        return (entity instanceof net.minecraft.world.entity.Display
++            || entity instanceof net.minecraft.world.entity.decoration.ArmorStand stand && (stand.isMarker() || stand.isNoGravity()))
++            && !entity.isPassenger() && !entity.isVehicle();
++    }
++    // Tessera end - update the viewers of stationary entities less often
++
+     private void newTrackerTick() {
+         // Folia start - profiler
+         final ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler = io.papermc.paper.threadedregions.TickRegionScheduler.getProfiler();
+@@ -1117,6 +1129,7 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+                 if (tracker == null) {
+                     continue;
+                 }
++                if (!this.skipTrackerUpdate(entity)) // Tessera - update the viewers of stationary entities less often
+                 ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$tick(nearbyPlayers.getChunk(entity.chunkPosition())); // Folia - region threading
+                 if (((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$hasPlayers()
+                     || ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus().isOrAfter(FullChunkStatus.ENTITY_TICKING)) {
+diff --git a/net/minecraft/world/entity/decoration/ArmorStand.java b/net/minecraft/world/entity/decoration/ArmorStand.java
+index 0ffcf91694269568ae5e63cbd325e622323e220e..ecd93843388b2a84a9af174dd3bb136ba29607f1 100644
+--- a/net/minecraft/world/entity/decoration/ArmorStand.java
++++ b/net/minecraft/world/entity/decoration/ArmorStand.java
+@@ -550,7 +550,7 @@ public class ArmorStand extends LivingEntity {
+     // Paper start - Allow ArmorStands not to tick
+     @Override
+     public void tick() {
+-        if (!this.canTick) {
++        if (!this.canTick || this.isLightTick()) { // Tessera - light tick for armor stands without physics
+             if (this.noTickEquipmentDirty) {
+                 this.noTickEquipmentDirty = false;
+                 this.detectEquipmentUpdates();
+@@ -568,6 +568,19 @@ public class ArmorStand extends LivingEntity {
+     }
+     // Paper end - Allow ArmorStands not to tick
+ 
++    // Tessera start - light tick for armor stands without physics
++    private boolean isLightTick() {
++        return io.papermc.paper.threadedregions.TesseraCompat.lightEntities()
++            && !this.hasPhysics()
++            && (this.tickCount + this.getId()) % 20 != 0 // a full tick once a second notices what setItemSlot does not report
++            && !this.isPassenger()
++            && !this.isVehicle()
++            && !this.isOnFire()
++            && this.portalProcess == null
++            && this.getActiveEffects().isEmpty();
++    }
++    // Tessera end - light tick for armor stands without physics
++
+     // Paper start - pass damage source for event
+     public void kill(final ServerLevel level, final @Nullable DamageSource source) {
+         this.kill(level, source, true);
