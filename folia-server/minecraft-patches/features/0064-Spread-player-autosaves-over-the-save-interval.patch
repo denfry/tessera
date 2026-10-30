@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 14:55:51 +0300
+Subject: [PATCH] Spread player autosaves over the save interval
+
+PlayerDataStorage writes to disk on the region thread, and with the
+default settings a region saved up to 20 players in one tick. Players
+that joined together are due together. On an idle disk this does not
+show, but while the disk is busy each write can take 200-300 ms, and
+with 30 bots and an autosave every 600 ticks the worst tick reached
+3.4 s.
+
+Without an explicit rate or max-per-tick, only as many players as the
+interval needs are saved per tick. The worst tick in the same test
+fell to 0.31 s. Explicit settings work as before.
+
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index bbfa502da63063ba6cc62651cef7339bea867059..ba55ca2c8c758fa03034488ecbaa5ea96e66a43a 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -1068,7 +1068,7 @@ public abstract class PlayerList {
+                 profiler.startTimer(ca.spottedleaf.leafprofiler.LProfilerRegistry.PLAYER_SAVE); try { // Folia - profiler
+                 this.save(player);
+                 } finally { profiler.stopTimer(ca.spottedleaf.leafprofiler.LProfilerRegistry.PLAYER_SAVE); } // Folia - profiler
+-                if (interval != -1 && ++numSaved >= io.papermc.paper.configuration.GlobalConfiguration.get().playerAutoSave.maxPerTick()) {
++                if (interval != -1 && ++numSaved >= io.papermc.paper.configuration.GlobalConfiguration.get().playerAutoSave.maxPerTick(interval, this.players.size())) { // Tessera - spread player autosaves over the save interval
+                     break;
+                 }
+             }

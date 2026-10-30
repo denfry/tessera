@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 14:55:51 +0300
+Subject: [PATCH] Add a player autosave limit based on the save interval
+
+Used when neither player-auto-save.rate nor max-per-tick is set.
+
+diff --git a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
+index bc342519315ccab8de85a9d9ebe055b27857f703..1bd31f6b33bb0c9fcae8532f394aa956eeaf236f 100644
+--- a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
++++ b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
+@@ -289,6 +289,15 @@ public class GlobalConfiguration extends ConfigurationPart {
+             }
+             return this.maxPerTick;
+         }
++
++        // Tessera start - spread player autosaves over the save interval
++        public int maxPerTick(final int interval, final int players) {
++            if (this.maxPerTick < 0 && this.rate < 0) {
++                return players / Math.max(1, interval) + 1;
++            }
++            return this.maxPerTick();
++        }
++        // Tessera end - spread player autosaves over the save interval
+     }
+ 
+     public Misc misc;
