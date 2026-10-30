@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Fri, 30 Oct 2026 10:51:55 +0300
+Subject: [PATCH] Make the dialog command and conversation input work
+
+
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index 0d73e0ee6d063440540bd9ddb386a4fccbda73c6..790a7609729c4f21312583c5f08b51a43ab2ec91 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -209,7 +209,7 @@ public class Commands {
+         //DataPackCommand.register(this.dispatcher, context); // Folia - region threading - TODO
+         //DebugCommand.register(this.dispatcher); // Folia - region threading - TODO
+         DefaultGameModeCommands.register(this.dispatcher);
+-        //DialogCommand.register(this.dispatcher, context); // Folia - region threading - TODO
++        DialogCommand.register(this.dispatcher, context); // Tessera - dialogs are sent on the player's thread
+         DifficultyCommand.register(this.dispatcher);
+         EffectCommands.register(this.dispatcher, context);
+         EmoteCommands.register(this.dispatcher);
+diff --git a/net/minecraft/server/commands/DialogCommand.java b/net/minecraft/server/commands/DialogCommand.java
+index 387db3c3eacb807bd00dc0a10f2cdcfeedd8b3dd..435b13808d0c60e6e8c950902990f78d2bce94cb 100644
+--- a/net/minecraft/server/commands/DialogCommand.java
++++ b/net/minecraft/server/commands/DialogCommand.java
+@@ -58,7 +58,9 @@ public class DialogCommand {
+         CommandResponseTracker<ServerPlayer> tracker = CommandResponseTracker.create();
+ 
+         for (ServerPlayer target : targets) {
+-            target.openDialog(dialog);
++            // Tessera start - dialogs are sent on the player's thread
++            target.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer player) -> player.openDialog(dialog));
++            // Tessera end - dialogs are sent on the player's thread
+             tracker.track(target);
+         }
+ 
+@@ -69,7 +71,9 @@ public class DialogCommand {
+         CommandResponseTracker<ServerPlayer> tracker = CommandResponseTracker.create();
+ 
+         for (ServerPlayer target : targets) {
+-            target.connection.send(ClientboundClearDialogPacket.INSTANCE);
++            // Tessera start - dialogs are sent on the player's thread
++            target.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer player) -> player.connection.send(ClientboundClearDialogPacket.INSTANCE));
++            // Tessera end - dialogs are sent on the player's thread
+             tracker.track(target);
+         }
+ 
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index d412a84de36cd57c92e8a38293c93cd8c2a89f1e..55e1ab66b0624008879fb238b7fb199f35ef9b8d 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -2729,9 +2729,10 @@ public class ServerGamePacketListenerImpl
+         if (rawMessage.isEmpty()) {
+             LOGGER.warn("{} tried to send an empty message", this.player.getScoreboardName());
+         } else if (this.getCraftPlayer().isConversing()) {
+-            if (true) throw new UnsupportedOperationException(); // Folia - region threading
+             final String conversationInput = rawMessage;
+-            this.server.processQueue.add(() -> ServerGamePacketListenerImpl.this.getCraftPlayer().acceptConversationInput(conversationInput));
++            // Tessera start - conversation input is handled on the player's thread
++            this.player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer player) -> player.getBukkitEntity().acceptConversationInput(conversationInput));
++            // Tessera end - conversation input is handled on the player's thread
+         } else if (this.player.getChatVisibility() == ChatVisiblity.SYSTEM) { // Re-add "Command Only" flag check
+             this.send(new ClientboundSystemChatPacket(Component.translatable("chat.cannotSend").withStyle(ChatFormatting.RED), false));
+         } else {

@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Fri, 30 Oct 2026 10:51:55 +0300
+Subject: [PATCH] Run the conversation inactivity timer on Folia schedulers
+
+
+diff --git a/src/main/java/org/bukkit/conversations/InactivityConversationCanceller.java b/src/main/java/org/bukkit/conversations/InactivityConversationCanceller.java
+index 185099828c08a9bb352c05c68a9f7e2d29f0beb8..01c527a57d9fc8535c2ca9246e43b1c20529cd7a 100644
+--- a/src/main/java/org/bukkit/conversations/InactivityConversationCanceller.java
++++ b/src/main/java/org/bukkit/conversations/InactivityConversationCanceller.java
+@@ -17,7 +17,7 @@ public class InactivityConversationCanceller implements ConversationCanceller {
+     protected Plugin plugin;
+     protected int timeoutSeconds;
+     protected Conversation conversation;
+-    private int taskId = -1;
++    private io.papermc.paper.threadedregions.scheduler.ScheduledTask task; // Tessera - region aware timer
+ 
+     /**
+      * Creates an InactivityConversationCanceller.
+@@ -54,27 +54,34 @@ public class InactivityConversationCanceller implements ConversationCanceller {
+      * Starts an inactivity timer.
+      */
+     private void startTimer() {
+-        taskId = plugin.getServer().getScheduler().scheduleSyncDelayedTask(plugin, new Runnable() {
+-            @Override
+-            public void run() {
+-                if (conversation.getState() == Conversation.ConversationState.UNSTARTED) {
+-                    startTimer();
+-                } else if (conversation.getState() == Conversation.ConversationState.STARTED) {
+-                    cancelling(conversation);
+-                    conversation.abandon(new ConversationAbandonedEvent(conversation, InactivityConversationCanceller.this));
+-                }
++        // Tessera start - region aware timer, on the thread of the entity that converses or on the global region
++        final java.util.function.Consumer<io.papermc.paper.threadedregions.scheduler.ScheduledTask> run = scheduled -> {
++            if (conversation.getState() == Conversation.ConversationState.UNSTARTED) {
++                startTimer();
++            } else if (conversation.getState() == Conversation.ConversationState.STARTED) {
++                cancelling(conversation);
++                conversation.abandon(new ConversationAbandonedEvent(conversation, InactivityConversationCanceller.this));
+             }
+-        }, timeoutSeconds * 20);
++        };
++        final long delay = Math.max(1L, timeoutSeconds * 20L);
++        if (conversation.getForWhom() instanceof org.bukkit.entity.Entity entity) {
++            task = entity.getScheduler().runDelayed(plugin, run, null, delay);
++        } else {
++            task = plugin.getServer().getGlobalRegionScheduler().runDelayed(plugin, run, delay);
++        }
++        // Tessera end - region aware timer, on the thread of the entity that converses or on the global region
+     }
+ 
+     /**
+      * Stops the active inactivity timer.
+      */
+     private void stopTimer() {
+-        if (taskId != -1) {
+-            plugin.getServer().getScheduler().cancelTask(taskId);
+-            taskId = -1;
++        // Tessera start - region aware timer
++        if (task != null) {
++            task.cancel();
++            task = null;
+         }
++        // Tessera end - region aware timer
+     }
+ 
+     /**
