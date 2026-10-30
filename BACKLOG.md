@@ -45,18 +45,6 @@
 
 ## P0 — в первую очередь
 
-### T-037 spark на Tessera
-- **Зачем.** После T-003 видно, какой регион тормозит (`/tps`, `getRegionReport`, JMX), но нет профиля — что внутри региона ест время.
-- **Что проверено** (сборка main@73c05f6, spark 1.10.194, CI build 546). `spark-bukkit` не помечен `folia-supported` и не грузится. С
-  принудительным `folia-supported: true` падает в `onEnable`: `UnsupportedOperationException` в `BukkitSparkPlugin.executeAsync`
-  (Bukkit scheduler). Встроенный в Paper spark (`spark-paper`) в Folia выключен жёстко: `if (false) // Folia - disable in-built spark
-  profiler` в Region-Threading-Base, опция `spark.enabled` ни на что не влияет.
-- **Что нужно.** Включить встроенный spark с адаптерами под регионы: tick hook/reporter только с потоков регионов, TickStatistics из
-  `TickRegionScheduler`, WorldInfo по регионам, async-задачи через свой executor. Образец — `FoliaSparkPlugin` в Canvas (GPL-3.0,
-  ~1 000 строк без закрепления региона за потоком). Профиль одного региона на EDF-планировщике Folia недоступен: spark профилирует
-  потоки, а регион ходит по потокам — получится профиль всех потоков регионов.
-- **Готово, когда.** `/spark profiler start` и `/spark tps` работают на Tessera без ошибок, профиль загружается на spark.lucko.me.
-
 ---
 
 ## P1 — заметно игрокам
@@ -346,4 +334,5 @@
 | Потокобезопасный скорборд: личные доски, команды, `/team`, `/scoreboard`, T-004 | #25 | 0027 / paper 0011 |
 | Результат `PlayerBucketEmptyEvent` у каждого потока свой, T-027 | — | 0028 |
 | Отчёт о регионах (`getRegionReport`, `getRegionReports`) и JMX `dev.tessera:type=Region`, T-003 | #299, #398 | 0029 / paper 0012 / api 0006 |
+| Встроенный spark под регионы: профиль потоков регионов, TPS самого медленного региона, T-037 | #299 | paper 0013 |
 | Выбор стиля логов в консоли (`pretty` / `classic`), T-050 | — | paper 0014 |
