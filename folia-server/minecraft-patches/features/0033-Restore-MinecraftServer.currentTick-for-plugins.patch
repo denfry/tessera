@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 10:21:51 +0300
+Subject: [PATCH] Restore MinecraftServer.currentTick for plugins
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 117d3351140acf5c8e302cdf3c077e7ced3b2123..479d3c99f64d8bfba7897f85144f8342f755345c 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -246,6 +246,7 @@ public final class RegionizedServer {
+ 
+     private void globalTick(final long tickCount) {
+         ++this.tickCount;
++        net.minecraft.server.MinecraftServer.currentTick = (int)this.tickCount; // Tessera - restore MinecraftServer.currentTick for plugins
+         // expire invalid click command callbacks
+         io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.ADVENTURE_CLICK_MANAGER.handleQueue((int)this.tickCount); // Paper // Folia - region threading - moved to global tick
+         io.papermc.paper.adventure.providers.ClickCallbackProviderImpl.DIALOG_CLICK_MANAGER.handleQueue((int)this.tickCount); // Paper // Folia - region threading - moved to global tick
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 240298545a870a4ddf17c8e527ffc5500169f2cf..e001e7beb62e679fb12390d2e4c04430963f93f8 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -313,7 +313,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+     public org.bukkit.craftbukkit.CraftServer server;
+     public joptsimple.OptionSet options;
+     public org.bukkit.command.ConsoleCommandSender console;
+-    //public static int currentTick; // Paper - improve tick loop // Folia - region threading
++    public static int currentTick; // Paper - improve tick loop // Folia - region threading // Tessera - ticks of the global region, read by plugins such as FastAsyncWorldEdit
+     public java.util.Queue<Runnable> processQueue = new java.util.concurrent.ConcurrentLinkedQueue<Runnable>();
+     public int autosavePeriod;
+     // Paper - don't store the vanilla dispatcher

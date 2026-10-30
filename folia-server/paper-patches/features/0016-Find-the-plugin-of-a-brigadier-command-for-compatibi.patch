@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 10:21:52 +0300
+Subject: [PATCH] Find the plugin of a brigadier command for compatibility mode
+
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index 1345bb6102683c51ec84a9b6f328e8f596cc3a28..2df65185d48e85ae6bab09a21cdc1d1754c924f8 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -1,5 +1,7 @@
+ package io.papermc.paper.threadedregions;
+ 
++import com.mojang.brigadier.ParseResults;
++import com.mojang.brigadier.context.ParsedCommandNode;
+ import com.mojang.logging.LogUtils;
+ import java.io.IOException;
+ import java.io.Reader;
+@@ -10,6 +12,7 @@ import java.util.List;
+ import java.util.Locale;
+ import java.util.Map;
+ import java.util.Set;
++import io.papermc.paper.command.brigadier.APICommandMeta;
+ import io.papermc.paper.plugin.provider.classloader.ConfiguredPluginClassLoader;
+ import net.kyori.adventure.text.Component;
+ import net.kyori.adventure.text.format.NamedTextColor;
+@@ -137,6 +140,28 @@ public final class TesseraCompat {
+         return plugin != null && isCompat(plugin) ? plugin : null;
+     }
+ 
++    /**
++     * Returns the plugin in compatibility mode that registered the brigadier command, or {@code null}. Commands added to
++     * the dispatcher without the Paper API, as Skript does, are matched by the class loader of their executor. Commands
++     * of the Bukkit command map are handled in {@code BukkitCommandNode}.
++     */
++    public static Plugin compatOwner(final ParseResults<?> parse) {
++        if (!enabled()) {
++            return null;
++        }
++        final List<? extends ParsedCommandNode<?>> nodes = parse.getContext().getNodes();
++        if (nodes.isEmpty()) {
++            return null;
++        }
++        final APICommandMeta meta = nodes.get(0).getNode().apiCommandMeta;
++        Plugin plugin = meta == null ? null : meta.plugin();
++        if (plugin == null && parse.getContext().getCommand() != null
++            && parse.getContext().getCommand().getClass().getClassLoader() instanceof ConfiguredPluginClassLoader loader) {
++            plugin = loader.getPlugin();
++        }
++        return plugin != null && isCompat(plugin) ? plugin : null;
++    }
++
+     /**
+      * Returns whether code of a plugin in compatibility mode is on the call stack. Only for paths that would throw
+      * otherwise, such as APIs Folia has no synchronous variant of: walking the stack is not free.

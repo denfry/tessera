@@ -42,6 +42,43 @@ def read_string(b, i):
     return b[i:i + n].decode('utf-8'), i + n
 
 
+def nbt_texts(b):
+    """Strings of a network NBT text component, in order (enough to read chat)."""
+    out = []
+
+    def payload(t, i):
+        if t in (1,): return i + 1
+        if t == 2: return i + 2
+        if t in (3, 5): return i + 4
+        if t in (4, 6): return i + 8
+        if t == 7: return i + 4 + struct.unpack('>i', b[i:i + 4])[0]
+        if t == 8:
+            n = struct.unpack('>H', b[i:i + 2])[0]
+            out.append(b[i + 2:i + 2 + n].decode('utf-8', 'replace'))
+            return i + 2 + n
+        if t == 9:
+            et, n = b[i], struct.unpack('>i', b[i + 1:i + 5])[0]
+            i += 5
+            for _ in range(n): i = payload(et, i)
+            return i
+        if t == 10:
+            while b[i] != 0:
+                et = b[i]; n = struct.unpack('>H', b[i + 1:i + 3])[0]
+                key = b[i + 3:i + 3 + n].decode('utf-8', 'replace')
+                before = len(out)
+                i = payload(et, i + 3 + n)
+                if et == 8 and key != 'text': del out[before:]
+            return i + 1
+        if t == 11: return i + 4 + 4 * struct.unpack('>i', b[i:i + 4])[0]
+        if t == 12: return i + 4 + 8 * struct.unpack('>i', b[i:i + 4])[0]
+        raise ValueError(t)
+    try:
+        payload(b[0], 1)
+    except Exception:
+        pass
+    return ''.join(out)
+
+
 class Scoreboard:
     def __init__(self):
         self.teams, self.objectives = set(), set()
@@ -163,6 +200,8 @@ while True:
             print('JOINED (play login) after %.2fs' % (joined_at - t0))
         elif pid == 45:
             c.send(28, data)
+        elif pid == 124:  # system_chat: text component, overlay
+            print('CHAT:', nbt_texts(data), flush=True)
         elif pid == 32:
             print('PLAY DISCONNECT', data[:300]); board and board.report(); sys.exit(1)
         elif board:
