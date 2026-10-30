@@ -57,24 +57,6 @@ The workflow, code rules and test harness are in [AGENTS.md](AGENTS.md); patch r
   the same: all lecterns taken in ~8 s, not a single `LOSING_JOB` in 4 min. Not checked: day/night cycle, unloading and
   loading the farm chunks, villagers at a region border, a multi-hour run. If it comes up again, a world with the farm is needed.
 
-### T-030 Entities and AI touch a foreign region
-- Issues: [#386](https://github.com/PaperMC/Folia/issues/386) (Zombie), [#381](https://github.com/PaperMC/Folia/issues/381)
-  (getEntities async), [#334](https://github.com/PaperMC/Folia/issues/334) (pig tower), [#203](https://github.com/PaperMC/Folia/issues/203)
-  (AI reads a block outside the region), [#199](https://github.com/PaperMC/Folia/issues/199) (entity moves outside the region),
-  [#152](https://github.com/PaperMC/Folia/issues/152) (owner state async), [#327](https://github.com/PaperMC/Folia/issues/327)
-  (player removal).
-- **How.** From the stack trace in the issue find the behaviour, sensor or method. Add a
-  `TickThread.isTickThreadFor(...)` check and skip or defer the action, following the already done patch
-  "Validate region ownership in AI behaviours". Each case is a separate commit.
-- **Done when.** Each stack trace has a patch or a "not reproducible on 26.3" note.
-- **References from Canvas.**
-  - #386: `Mob#setTarget` does not accept a target from a foreign region; zombie reinforcements do not load chunks
-    (`getChunkIfLoadedImmediately`).
-  - #199: in `Entity#move`, moving into a foreign region throws a custom exception, `Level#guardEntityTick` catches it and
-    does `teleportAsync` to the destination instead of crashing (Luminol's approach). Self-contained.
-  - #203: point checks in `TamableAnimal`, `Creaking`, `AllayAi`, `DragonFireball`, `startSleeping` (bed in a foreign
-    region), chorus and enderman random teleport (`randomTeleport` checks ownership of the target area).
-
 ### T-031 Villagers force-load chunks for POI — [#292](https://github.com/PaperMC/Folia/issues/292)
 - **Where.** `PoiManager#ensureLoadedAndValid`, `AcquirePoi`, `YieldJobSite`, `SetClosestHomeAsWalkTarget`. POI search loads
   chunks synchronously.
@@ -326,3 +308,8 @@ Folia regions are already isolated, the next step is spreading them across proce
 | Management server (JSON-RPC) works: methods run on the global tick (previously all failed with `UnsupportedOperationException`), connections tick once per global tick, `players/kick` without removing the player from a foreign thread, `server/status` returns `started: true`. Checked status, players, difficulty, gamerules, allowlist, operators, system_message, save, view_distance, kick, stop, T-033 | #416 | 0051 |
 | `teleportAsync` from `PlayerJoinEvent` no longer crashes the region: a player who is still joining is teleported on their next tick (another region, another world, same region), a direct `Entity#teleportAsync` call during join returns `false`, T-067 | — | 0052 / paper 0028 |
 | On a region hang the watchdog prints the region's chunk, entity and player counts, the thread state, the lock it waits for and its owner, monitors per stack frame and held `Lock`s; the stack of the awaited lock's owner (up to 3 hops) and a `DEADLOCKED` mark. Checked on a deadlock between two regions (monitor + `ReentrantLock`), T-034 | #447, #437, #196 | 0053 |
+| Entity with enough velocity to leave its region in one move is teleported on its next tick instead of failing the thread check and being discarded. Reproduced with a vex at 4995 blocks per tick, T-030 | #199 | 0057 |
+| Creaking and its heart do not read each other across regions (only possible after a teleport): the creaking no longer dies, T-030 | #203 | 0056 |
+| Allay does not read a liked note block in another region, pets do not load chunks to teleport to the owner. Precaution from reading the code: the allay case did not fail on the old build, T-030 | #203 | 0054, 0055 |
+| Zombie reinforcements do not load chunks. Crash not reproducible on 26.3: 40 reinforcement rounds at the edge of the loaded area, no errors; foreign targets are dropped by `Mob#asValidTarget`, T-030 | #386 | 0058 |
+| Not reproducible on 26.3 or already fixed, T-030: #334 (`BabyFollowAdult`, patch 0016), #152 (fishing hook, patch 0038), #327 (`PlayerList.remove` no longer ticks the player), #199 spectator path (Folia checks the camera). #381 and the log of #203: logs expired, the title of #381 points to a plugin calling `getEntities` off-region. `DragonFireball` needs no check: the gap between regions is wider than its search box | #334, #152, #327, #381 | — |

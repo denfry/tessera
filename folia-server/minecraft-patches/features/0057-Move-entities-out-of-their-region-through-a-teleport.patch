@@ -1,0 +1,62 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 12:20:41 +0300
+Subject: [PATCH] Move entities out of their region through a teleport
+
+An entity with enough velocity crosses the gap between regions in one move.
+setPos then fails the thread check and Level#guardEntityTick discards the
+entity. Moves of at least 30 blocks that end outside the region now schedule
+teleportAsync on the next tick of the entity.
+
+Fixes PaperMC/Folia#199
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 3bff89a972eff41471a156a3eb0c0b7f850b65e3..4dcc06f4b168bde8a9b68a79f5308618d56550d3 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -1192,6 +1192,7 @@ public abstract class Entity
+         try {
+         // Paper end - detailed watchdog information
+         if (this.noPhysics) {
++            if (this.tesseraMoveOutOfRegion(delta)) return; // Tessera - move out of the region through a teleport
+             this.setPos(this.getX() + delta.x, this.getY() + delta.y, this.getZ() + delta.z);
+             this.recordMovement(moverType, delta);
+             this.horizontalCollision = false;
+@@ -1242,6 +1243,12 @@ public abstract class Entity
+                     }
+                 }
+ 
++                // Tessera start - move out of the region through a teleport
++                if (this.tesseraMoveOutOfRegion(movement)) {
++                    profiler.pop();
++                    return;
++                }
++                // Tessera end - move out of the region through a teleport
+                 Vec3 pos = this.position();
+                 Vec3 newPosition = pos.add(movement);
+                 this.addMovementThisTick(new Entity.Movement(pos, newPosition, delta));
+@@ -4581,6 +4588,24 @@ public abstract class Entity
+         }
+     }
+ 
++    // Tessera start - move out of the region through a teleport
++    // An entity fast enough to cross the gap between regions in one move (plugin velocity, explosions) cannot be moved
++    // from this thread: the thread check would discard it. Teleport it on its next tick instead.
++    private boolean tesseraMoveOutOfRegion(final Vec3 delta) {
++        if (delta.lengthSqr() < 30.0 * 30.0 || this.isPassenger() || !delta.isFinite()
++            || ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), this.position(), delta, 0)) {
++            return false;
++        }
++        final Vec3 to = this.position().add(delta);
++        this.getBukkitEntity().taskScheduler.schedule((Entity entity) -> entity.teleportAsync(
++            (ServerLevel)entity.level(), to, Float.valueOf(entity.getYRot()), Float.valueOf(entity.getXRot()), entity.getDeltaMovement(),
++            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN,
++            TELEPORT_FLAG_LOAD_CHUNK | TELEPORT_FLAG_TELEPORT_PASSENGERS | TELEPORT_FLAG_NO_EVENT, null
++        ), null, 1L);
++        return true;
++    }
++    // Tessera end - move out of the region through a teleport
++
+     protected boolean canTeleportAsync() {
+         return !this.hasNullCallback() && !this.isRemoved() && this.isAlive() && (!(this instanceof net.minecraft.world.entity.LivingEntity livingEntity) || !livingEntity.isSleeping());
+     }

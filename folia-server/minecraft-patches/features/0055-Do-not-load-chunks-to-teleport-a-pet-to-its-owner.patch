@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 12:20:41 +0300
+Subject: [PATCH] Do not load chunks to teleport a pet to its owner
+
+Addresses PaperMC/Folia#203
+
+diff --git a/net/minecraft/world/entity/TamableAnimal.java b/net/minecraft/world/entity/TamableAnimal.java
+index 39558d68baa4a00295d6bb2bdb1e5edccd1e15cf..dac111887e72634ca59d58be67870f3d5b777e53 100644
+--- a/net/minecraft/world/entity/TamableAnimal.java
++++ b/net/minecraft/world/entity/TamableAnimal.java
+@@ -318,7 +318,8 @@ public abstract class TamableAnimal extends Animal implements OwnableEntity {
+             return false;
+         }
+ 
+-        BlockState blockStateBelow = this.level().getBlockState(pos.below());
++        BlockState blockStateBelow = this.level().getBlockStateIfLoaded(pos.below()); // Tessera - do not load chunks to teleport to the owner
++        if (blockStateBelow == null) return false; // Tessera - do not load chunks to teleport to the owner
+         if (!this.canFlyToOwner() && blockStateBelow.getBlock() instanceof LeavesBlock) {
+             return false;
+         }

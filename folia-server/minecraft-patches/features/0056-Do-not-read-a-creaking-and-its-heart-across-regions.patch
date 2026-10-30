@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 12:20:41 +0300
+Subject: [PATCH] Do not read a creaking and its heart across regions
+
+They stay within 34 blocks of each other, so they only end up in different
+regions after a teleport. The creaking then skips the heart checks instead of
+dying and the heart treats it as absent.
+
+Addresses PaperMC/Folia#203
+
+diff --git a/net/minecraft/world/entity/monster/creaking/Creaking.java b/net/minecraft/world/entity/monster/creaking/Creaking.java
+index ed5a38579d5d31967a58a5c965378169a9e0b70d..0598f3145ddffd79cdfdb5c10d930f79541641e5 100644
+--- a/net/minecraft/world/entity/monster/creaking/Creaking.java
++++ b/net/minecraft/world/entity/monster/creaking/Creaking.java
+@@ -166,7 +166,8 @@ public class Creaking extends Monster {
+             this.invulnerabilityAnimationRemainingTicks = 8;
+             this.level().broadcastEntityEvent(this, EntityEvent.SHAKE);
+             this.gameEvent(GameEvent.ENTITY_ACTION);
+-            if (this.level().getBlockEntity(homePos) instanceof CreakingHeartBlockEntity creakingHeartBlockEntity && creakingHeartBlockEntity.isProtector(this)
++            if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, homePos) // Tessera - the heart can be in another region after a teleport
++                && this.level().getBlockEntity(homePos) instanceof CreakingHeartBlockEntity creakingHeartBlockEntity && creakingHeartBlockEntity.isProtector(this)
+                 )
+              {
+                 if (responsiblePlayer != null) {
+@@ -246,7 +247,7 @@ public class Creaking extends Monster {
+     public void tick() {
+         if (!this.level().isClientSide()) {
+             BlockPos homePos = this.getHomePos();
+-            if (homePos != null) {
++            if (homePos != null && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor((ServerLevel)this.level(), homePos)) { // Tessera - the heart can be in another region after a teleport
+                 boolean hasProtectionFromCreakingHeart = this.level().getBlockEntity(homePos) instanceof CreakingHeartBlockEntity creakingHeartBlockEntity
+                     && creakingHeartBlockEntity.isProtector(this);
+                 if (!hasProtectionFromCreakingHeart) {
+diff --git a/net/minecraft/world/level/block/entity/CreakingHeartBlockEntity.java b/net/minecraft/world/level/block/entity/CreakingHeartBlockEntity.java
+index 9272f75f939eeccb0b163bd858446c371cfc52ff..408b4f7660d76d52ac125611472115c0dca1891d 100644
+--- a/net/minecraft/world/level/block/entity/CreakingHeartBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/CreakingHeartBlockEntity.java
+@@ -175,6 +175,11 @@ public class CreakingHeartBlockEntity extends BlockEntity {
+ 
+         if (this.creakingInfo.left().isPresent()) {
+             Creaking creaking = this.creakingInfo.left().get();
++            // Tessera start - the creaking can be in another region after a teleport
++            if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(creaking)) {
++                return NO_CREAKING;
++            }
++            // Tessera end - the creaking can be in another region after a teleport
+             if (!creaking.isRemoved()) {
+                 return Optional.of(creaking);
+             }

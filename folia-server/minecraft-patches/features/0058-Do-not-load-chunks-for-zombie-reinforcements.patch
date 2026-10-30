@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 12:20:41 +0300
+Subject: [PATCH] Do not load chunks for zombie reinforcements
+
+Addresses PaperMC/Folia#386
+
+diff --git a/net/minecraft/world/entity/monster/zombie/Zombie.java b/net/minecraft/world/entity/monster/zombie/Zombie.java
+index 071c1fba954486634599eab7843f7ae751ee5be6..cf68b38668bce80c1bd845a778239b077807e1c9 100644
+--- a/net/minecraft/world/entity/monster/zombie/Zombie.java
++++ b/net/minecraft/world/entity/monster/zombie/Zombie.java
+@@ -313,7 +313,8 @@ public class Zombie extends Monster {
+                 int yt = y + Mth.nextInt(this.random, 7, 40) * Mth.nextInt(this.random, -1, 1);
+                 int zt = z + Mth.nextInt(this.random, 7, 40) * Mth.nextInt(this.random, -1, 1);
+                 BlockPos spawnPos = new BlockPos(xt, yt, zt);
+-                if (SpawnPlacements.isSpawnPositionOk(type, level, spawnPos)
++                if (level.hasChunkAt(spawnPos) // Tessera - do not load chunks for reinforcements
++                    && SpawnPlacements.isSpawnPositionOk(type, level, spawnPos)
+                     && SpawnPlacements.checkSpawnRules(type, level, EntitySpawnReason.REINFORCEMENT, spawnPos, level.getRandom())) {
+                     reinforcement.setPos(xt, yt, zt);
+                     if (!level.hasNearbyAlivePlayerThatAffectsSpawning(xt, yt, zt, 7.0) // Paper - affects spawning api
