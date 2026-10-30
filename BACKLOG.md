@@ -247,6 +247,59 @@
 - В профиле Leaf были пики раз в минуту. Проверить, что автосохранение на Tessera размазано по тикам: `max-per-tick` для игроков,
   чанков и карт.
 
+### Логи в консоли: T-051–T-054
+Общая цель: консоль, которую удобно читать в веб-панелях (Pterodactyl и т.п.) и в Windows-консоли, плюс JSON для Loki/ELK.
+Пример строки по умолчанию:
+```
+12:34:56 INFO  [LuckPerms] Loaded 3 groups
+12:34:57 WARN  [world 12,-4] Entity moved too quickly
+12:34:58 ERROR [world 0,0] [EssentialsX] Could not save userdata
+  ↳ java.io.IOException: disk full
+      at c.e.UserData.save(UserData.java:88)        ← кадр плагина выделен
+      … 23 more (netty, reflection)
+```
+Стиль выбирается `-Dtessera.log.style` / `TESSERA_LOG_STYLE` (T-050, `TesseraLogStyle` + `Select` в `log4j2.xml`). Формат `latest.log` по умолчанию
+не меняется: на него завязаны чужие парсеры.
+
+#### T-051 Стиль `pretty`: цвета и теги
+- **Что.** Свой log4j `@Plugin`-конвертер (или layout) для консоли:
+  - время тусклое, уровень цветом и фиксированной ширины (`INFO `, `WARN `, `ERROR`);
+  - тег плагина `[Name]` стабильным цветом по хешу имени из палитры 6–8 читаемых цветов; у логгеров Minecraft/Mojang тега нет;
+  - `§`-коды и ANSI из сообщений плагинов отображаются как сейчас (`%minecraftFormatting`).
+- **Цвета.** По умолчанию 16 цветов ANSI — их понимают и панели, и Windows. `NO_COLOR` выключает цвет, `FORCE_COLOR` включает без
+  TTY (у панелей TTY нет, а ANSI они рисуют). Проверить, какие переменные окружения выставляет Pterodactyl (`P_SERVER_UUID`?), и
+  включать цвет там автоматически. Проверить cmd, PowerShell и Windows Terminal (JLine на Windows).
+- **Проверка.** Скриншоты в панели, cmd и Windows Terminal; `NO_COLOR=1` даёт вывод без единого ESC-символа.
+- **Плагин log4j.** Проверить, что `Log4j2Plugins.dat` генерируется для классов Tessera при сборке (иначе плагин не найдётся).
+
+#### T-052 Регион в строке лога
+- **Что.** Сообщение с потока региона помечается `[мир x,z]` — центральный чанк региона, как в `/tps`. С глобального потока —
+  `[global]`, с остальных — ничего.
+- **Как.** Логирование идёт через `Async`-аппендер, поэтому регион надо брать при создании события, а не при форматировании: свой
+  `ContextDataInjector` (`log4j2.contextDataInjector`) кладёт в context data `tessera.region` из
+  `TickRegionScheduler.getCurrentRegion()`. Строку кешировать на регионе и сбрасывать при слиянии и разделении.
+  Глобальный поток определять по самому потоку, а не по `region == null`: в compat-режиме (ветка `feat/plugin-compat`,
+  `TesseraRegionLoan`) глобальный поток на время задачи плагина берёт регион взаймы, и `getCurrentRegion()` его возвращает.
+  Такую строку помечать `[global → мир x,z]`. Если понадобится менять `TickRegionScheduler`, сначала согласовать с веткой compat.
+- **Готово, когда.** Предупреждения из тика региона в консоли и JSON показывают регион; накладные расходы на событие — без
+  аллокаций в горячем пути (замерить JMH или 100k логов).
+
+#### T-053 Короткие стектрейсы
+- **Что.** В `pretty` из `%xEx` убирать кадры `io.netty`, `jdk.internal.reflect`, `java.lang.reflect`, `org.apache.logging` и
+  лямбда-обёрток планировщика (свёртка в `… N more (netty, reflection)`); кадры из jar плагинов выделять цветом. В `latest.log`
+  трейс остаётся полным.
+- **Готово, когда.** Исключение из `onEnable` тестового плагина в консоли занимает несколько строк, причина и кадр плагина видны
+  сразу.
+
+#### T-054 Стиль `json` и файл `latest.json`
+- **Что.** `json` — одна строка JSON на событие в stdout (для Docker и Loki); значение добавить в `TesseraLogStyle.resolve` и ветку в
+  `log4j2.xml`. Отдельно, в любом стиле, `-Dtessera.log.json-file=true`
+  пишет `logs/latest.json` с той же ротацией, что и `latest.log`. Формат — ECS через `log4j-layout-template-json` (проверить,
+  есть ли модуль в зависимостях Paper; если нет — добавить).
+- **Поля.** `@timestamp`, `log.level`, `log.logger`, `message` без `§` и ANSI, `process.thread.name`, `tessera.plugin`,
+  `tessera.region.world` / `chunk_x` / `chunk_z` (из T-052), `error.type` / `error.message` / `error.stack_trace`.
+- **Готово, когда.** Логи читаются `jq` без ошибок, промтейл/Filebeat разбирает поля без своих regex. Описать в README.
+
 ---
 
 ## P3 — потом
@@ -293,3 +346,4 @@
 | Потокобезопасный скорборд: личные доски, команды, `/team`, `/scoreboard`, T-004 | #25 | 0027 / paper 0011 |
 | Результат `PlayerBucketEmptyEvent` у каждого потока свой, T-027 | — | 0028 |
 | Отчёт о регионах (`getRegionReport`, `getRegionReports`) и JMX `dev.tessera:type=Region`, T-003 | #299, #398 | 0029 / paper 0012 / api 0006 |
+| Выбор стиля логов в консоли (`pretty` / `classic`), T-050 | — | paper 0014 |

@@ -70,6 +70,10 @@ Run it like any Paper server jar (Java 25 required):
 java -Xms4G -Xmx4G -jar server.jar --nogui   # server.jar = the downloaded *-paperclip-*.jar
 ```
 
+The console log style is set with `-Dtessera.log.style=<style>` or the `TESSERA_LOG_STYLE` environment variable:
+`pretty` (default, `12:34:56 INFO  [Plugin] message`) or `classic` (the Paper format, `[12:34:56 INFO]: [Plugin] message`).
+`logs/latest.log` keeps the Paper format in every style.
+
 ## Building
 
 Requires Git and JDK 25 (Gradle downloads one if missing).

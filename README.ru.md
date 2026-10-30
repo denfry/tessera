@@ -70,6 +70,10 @@ Tessera запускает только плагины с `folia-supported: true
 java -Xms4G -Xmx4G -jar server.jar --nogui   # server.jar — скачанный *-paperclip-*.jar
 ```
 
+Стиль логов в консоли задаётся `-Dtessera.log.style=<стиль>` или переменной окружения `TESSERA_LOG_STYLE`:
+`pretty` (по умолчанию, `12:34:56 INFO  [Plugin] сообщение`) или `classic` (формат Paper, `[12:34:56 INFO]: [Plugin] сообщение`).
+`logs/latest.log` в любом стиле пишется в формате Paper.
+
 ## Сборка
 
 Нужны Git и JDK 25 (если JDK нет, Gradle скачает её сам).

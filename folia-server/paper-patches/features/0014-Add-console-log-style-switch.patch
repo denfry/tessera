@@ -1,0 +1,118 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:00:53 +0300
+Subject: [PATCH] Add console log style switch
+
+The console layout is now chosen by the tessera.log.style system property or the TESSERA_LOG_STYLE environment variable, since panels make JVM flags awkward to change. 'classic' keeps the Paper console format byte for byte, 'pretty' (the default) drops the brackets and aligns the level. The log file format is the same in every style.
+
+diff --git a/src/main/java/io/papermc/paper/log/TesseraLogStyle.java b/src/main/java/io/papermc/paper/log/TesseraLogStyle.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..757ba05726dfcb2c9720941686b8ec5c0c788d95
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/log/TesseraLogStyle.java
+@@ -0,0 +1,44 @@
++package io.papermc.paper.log;
++
++import java.util.Locale;
++
++// Tessera start - console log style
++/**
++ * Picks the console log style before Log4j starts. {@code log4j2.xml} selects the console layout by the
++ * {@value #PROPERTY} system property; this fills it from the {@value #ENV} environment variable (panels make
++ * JVM flags awkward to change) and falls back to {@code pretty} on unknown values.
++ */
++public final class TesseraLogStyle {
++
++    public static final String PROPERTY = "tessera.log.style";
++    public static final String ENV = "TESSERA_LOG_STYLE";
++    public static final String CLASSIC = "classic";
++    public static final String PRETTY = "pretty";
++
++    private TesseraLogStyle() {
++    }
++
++    public static void init() {
++        String raw = System.getProperty(PROPERTY);
++        if (raw == null || raw.isBlank()) {
++            raw = System.getenv(ENV);
++        }
++        System.setProperty(PROPERTY, resolve(raw));
++    }
++
++    static String resolve(final String raw) {
++        if (raw == null || raw.isBlank()) {
++            return PRETTY;
++        }
++        final String style = raw.trim().toLowerCase(Locale.ROOT);
++        return switch (style) {
++            case CLASSIC, PRETTY -> style;
++            default -> {
++                // Log4j is not up yet
++                System.err.println("Unknown log style '" + raw + "' in " + PROPERTY + "/" + ENV + ", using " + PRETTY + " (expected " + CLASSIC + " or " + PRETTY + ")");
++                yield PRETTY;
++            }
++        };
++    }
++}
++// Tessera end - console log style
+diff --git a/src/main/java/org/bukkit/craftbukkit/Main.java b/src/main/java/org/bukkit/craftbukkit/Main.java
+index eb0ac87536692ea1215bdbb4646cfa6589e6fb10..d64a185e5c57bcdeb614abb0c6b524f09c1fc468 100644
+--- a/src/main/java/org/bukkit/craftbukkit/Main.java
++++ b/src/main/java/org/bukkit/craftbukkit/Main.java
+@@ -22,6 +22,7 @@ public class Main {
+     // Paper end - Reset loggers after shutdown
+ 
+     public static void main(String[] args) {
++        io.papermc.paper.log.TesseraLogStyle.init(); // Tessera - console log style, before anything touches Log4j
+         if (System.getProperty("jdk.nio.maxCachedBufferSize") == null) System.setProperty("jdk.nio.maxCachedBufferSize", "262144"); // Paper - cap per-thread NIO cache size; https://www.evanjones.ca/java-bytebuffer-leak.html
+ 
+         if (System.getProperty("joml.nounsafe") == null) {
+diff --git a/src/main/resources/log4j2.xml b/src/main/resources/log4j2.xml
+index 4d881018248133d51661b45a087ebafdca62be8f..4af1ed5c822545162f73efa2067e456e44fb1722 100644
+--- a/src/main/resources/log4j2.xml
++++ b/src/main/resources/log4j2.xml
+@@ -4,16 +4,34 @@
+         <Queue name="ServerGuiConsole">
+             <PatternLayout pattern="[%d{HH:mm:ss} %level]: %msg{nolookups}%n" />
+         </Queue>
+-        <TerminalConsole name="TerminalConsole">
+-            <PatternLayout>
+-                <LoggerNamePatternSelector defaultPattern="%highlightError{[%d{HH:mm:ss} %level]: [%logger] %msg%n%xEx{full}}">
+-                    <!-- Log root, Minecraft, Mojang and Bukkit loggers without prefix -->
+-                    <!-- Disable prefix for various plugins that bypass the plugin logger -->
+-                    <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
+-                                  pattern="%highlightError{[%d{HH:mm:ss} %level]: %msg%n%xEx{full}}" />
+-                </LoggerNamePatternSelector>
+-            </PatternLayout>
+-        </TerminalConsole>
++        <!-- Tessera start - console log style: -Dtessera.log.style or TESSERA_LOG_STYLE, see TesseraLogStyle -->
++        <Select>
++            <SystemPropertyArbiter propertyName="tessera.log.style" propertyValue="classic">
++                <TerminalConsole name="TerminalConsole">
++                    <PatternLayout>
++                        <LoggerNamePatternSelector defaultPattern="%highlightError{[%d{HH:mm:ss} %level]: [%logger] %msg%n%xEx{full}}">
++                            <!-- Log root, Minecraft, Mojang and Bukkit loggers without prefix -->
++                            <!-- Disable prefix for various plugins that bypass the plugin logger -->
++                            <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
++                                          pattern="%highlightError{[%d{HH:mm:ss} %level]: %msg%n%xEx{full}}" />
++                        </LoggerNamePatternSelector>
++                    </PatternLayout>
++                </TerminalConsole>
++            </SystemPropertyArbiter>
++            <DefaultArbiter>
++                <TerminalConsole name="TerminalConsole">
++                    <PatternLayout>
++                        <LoggerNamePatternSelector defaultPattern="%highlightError{%d{HH:mm:ss} %-5level [%logger] %msg%n%xEx{full}}">
++                            <!-- Log root, Minecraft, Mojang and Bukkit loggers without prefix -->
++                            <!-- Disable prefix for various plugins that bypass the plugin logger -->
++                            <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
++                                          pattern="%highlightError{%d{HH:mm:ss} %-5level %msg%n%xEx{full}}" />
++                        </LoggerNamePatternSelector>
++                    </PatternLayout>
++                </TerminalConsole>
++            </DefaultArbiter>
++        </Select>
++        <!-- Tessera end - console log style -->
+         <RollingRandomAccessFile name="File" fileName="logs/latest.log" filePattern="logs/%d{yyyy-MM-dd}-%i.log.gz">
+             <PatternLayout>
+                 <LoggerNamePatternSelector defaultPattern="[%d{HH:mm:ss}] [%t/%level]: [%logger] %stripAnsi{%msg}%n%xEx{full}">
