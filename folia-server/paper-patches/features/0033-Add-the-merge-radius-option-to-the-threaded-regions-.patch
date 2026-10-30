@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 13:27:16 +0300
+Subject: [PATCH] Add the merge radius option to the threaded regions config
+
+Configuration part of the merge radius option. Read once at startup,
+like grid-exponent.
+
+diff --git a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
+index eb868697ecf198db9cf0a89d14553fc5d9a2ad2f..bc342519315ccab8de85a9d9ebe055b27857f703 100644
+--- a/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
++++ b/src/main/java/io/papermc/paper/configuration/GlobalConfiguration.java
+@@ -399,6 +399,7 @@ public class GlobalConfiguration extends ConfigurationPart {
+ 
+         public int threads = -1;
+         public int gridExponent = 4;
++        public int mergeRadius = 1; // Tessera - configurable merge radius, in sections of 2^grid-exponent chunks
+         public io.papermc.paper.threadedregions.TickRegionScheduler.SchedulerType scheduler = io.papermc.paper.threadedregions.TickRegionScheduler.SchedulerType.EDF;
+ 
+         @PostProcess

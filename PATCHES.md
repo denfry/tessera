@@ -102,3 +102,5 @@ numbers on every rebuild, so a number can shift after an upstream merge; the pat
 - **Description** — one line: what changes for a server owner or plugin author.
 - **Upstream ref** — `PaperMC/Folia#NNN` (or a Paper issue/PR) if the patch ports or addresses
   something upstream; `—` if it is Tessera-only.
+| [0062-Add-a-merge-radius-option-for-regions](folia-server/minecraft-patches/features/0062-Add-a-merge-radius-option-for-regions.patch) | performance | The region merge radius comes from the config instead of a constant; the default keeps the previous value | — |
+| [0033-Add-the-merge-radius-option-to-the-threaded-regions-](folia-server/paper-patches/features/0033-Add-the-merge-radius-option-to-the-threaded-regions-.patch) | performance | `threaded-regions.merge-radius` (default 1) in `config/paper-global.yml` | — |
