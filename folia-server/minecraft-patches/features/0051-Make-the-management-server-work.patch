@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Fri, 30 Oct 2026 11:31:10 +0300
+Subject: [PATCH] Make the management server work
+
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 479d3c99f64d8bfba7897f85144f8342f755345c..46751b44278961c5080bf3008f32e1471525b40e 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -273,6 +273,12 @@ public final class RegionizedServer {
+         // tick player ping sample
+         this.tickPlayerSample();
+ 
++        // Tessera start - management server on Folia
++        if (net.minecraft.server.MinecraftServer.getServer() instanceof net.minecraft.server.dedicated.DedicatedServer dedicatedServer) {
++            dedicatedServer.tickManagementServer();
++        }
++        // Tessera end - management server on Folia
++
+         // tick worlds
+         for (final ServerLevel world : this.worlds) {
+             this.globalTick(world, tickCount);
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index e001e7beb62e679fb12390d2e4c04430963f93f8..352d799e08bb37a390a0c439015e87f1bb63f55e 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1335,6 +1335,7 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             // Folia start - region threading
+             if (true) {
+                 io.papermc.paper.threadedregions.RegionizedServer.getInstance().init(); // Folia - region threading - only after loading worlds
++                this.isReady = true; // Tessera - management server on Folia, the vanilla tick loop that sets it does not run
+                 final long actualDoneTimeMs = System.currentTimeMillis() - org.bukkit.craftbukkit.Main.BOOT_TIME.toEpochMilli(); // Paper - Improve startup message
+                 LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1000.00D)); // Paper - Improve startup message
+                 for (;;) {
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index 762822ce2ccf98952dc92be4824c48fe6bc1bacb..01004a432e727c1de46b13e70de839feb0b28354 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -405,10 +405,16 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+                            final io.papermc.paper.threadedregions.TickRegions.TickRegionData region) {
+         super.tickServer(startTime, scheduledEnd, targetBuffer, region);
+         // Folia end - region threading
++        // Tessera - management server connections tick on the global tick, see tickManagementServer
++    }
++
++    // Tessera start - management server on Folia
++    public void tickManagementServer() {
+         if (this.jsonRpcServer != null) {
+             this.jsonRpcServer.tick();
+         }
+     }
++    // Tessera end - management server on Folia
+ 
+     @Override
+     public boolean saveAllChunks(final boolean silent, final boolean flush, final boolean force, final boolean close) { // Paper - rewrite chunk system - add close param
+diff --git a/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java b/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java
+index 81d21b23932fb7b4887cfcc16381d348385a3bf8..a204792a39fc248cbe174bad7eb5fd9a275f7fe4 100644
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftExecutorServiceImpl.java
+@@ -19,11 +19,27 @@ public class MinecraftExecutorServiceImpl implements MinecraftExecutorService {
+ 
+     @Override
+     public <V> CompletableFuture<V> submit(final Supplier<V> supplier) {
+-        return this.server().submit(supplier);
++        // Tessera start - management server on Folia, the server main thread does not run tasks, the global tick does
++        if (io.papermc.paper.threadedregions.RegionizedServer.isGlobalTickThread()) {
++            return CompletableFuture.completedFuture(supplier.get());
++        }
++        final CompletableFuture<V> future = new CompletableFuture<>();
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> {
++            try {
++                future.complete(supplier.get());
++            } catch (final Throwable throwable) {
++                future.completeExceptionally(throwable);
++            }
++        });
++        return future;
++        // Tessera end - management server on Folia, the server main thread does not run tasks, the global tick does
+     }
+ 
+     @Override
+     public CompletableFuture<Void> submit(final Runnable runnable) {
+-        return this.server().submit(runnable);
++        return this.submit(() -> { // Tessera - management server on Folia
++            runnable.run();
++            return null;
++        });
+     }
+ }
+diff --git a/net/minecraft/server/jsonrpc/internalapi/MinecraftPlayerListServiceImpl.java b/net/minecraft/server/jsonrpc/internalapi/MinecraftPlayerListServiceImpl.java
+index 2e220f8e33608744f0ec72319106b5aac380b754..831648f28cf4f8bfa4d5c05240a395a4efa4a86d 100644
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftPlayerListServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftPlayerListServiceImpl.java
+@@ -66,7 +66,10 @@ public class MinecraftPlayerListServiceImpl implements MinecraftPlayerListServic
+ 
+     @Override
+     public void remove(final ServerPlayer serverPlayer, final ClientInfo clientInfo) {
+-        this.server().getPlayerList().remove(serverPlayer);
++        // Tessera start - management server on Folia
++        // the player belongs to its region, the disconnect that follows removes it there
++        //this.server().getPlayerList().remove(serverPlayer);
++        // Tessera end - management server on Folia
+         this.jsonRpcLogger.log(clientInfo, "Remove player '{}'", serverPlayer.getPlainTextName());
+     }
+ 
