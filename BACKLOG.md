@@ -227,33 +227,13 @@
 - В профиле Leaf были пики раз в минуту. Проверить, что автосохранение на Tessera размазано по тикам: `max-per-tick` для игроков,
   чанков и карт.
 
-### Логи в консоли: T-054
-Общая цель: консоль, которую удобно читать в веб-панелях (Pterodactyl и т.п.) и в Windows-консоли, плюс JSON для Loki/ELK.
-Пример строки по умолчанию:
-```
-12:34:56 INFO  [LuckPerms] Loaded 3 groups
-12:34:57 WARN  [world 12,-4] Entity moved too quickly
-12:34:58 ERROR [world 0,0] [EssentialsX] Could not save userdata
-  ↳ java.io.IOException: disk full
-      at c.e.UserData.save(UserData.java:88)        ← кадр плагина выделен
-      … 23 more (netty, reflection)
-```
-Стиль выбирается `-Dtessera.log.style` / `TESSERA_LOG_STYLE` (T-050, `TesseraLogStyle` + `Select` в `log4j2.xml`). Формат `latest.log` по умолчанию
-не меняется: на него завязаны чужие парсеры.
-
-#### T-054 Стиль `json` и файл `latest.json`
-- **Что.** `json` — одна строка JSON на событие в stdout (для Docker и Loki); значение добавить в `TesseraLogStyle.resolve` и ветку в
-  `log4j2.xml`. Отдельно, в любом стиле, `-Dtessera.log.json-file=true`
-  пишет `logs/latest.json` с той же ротацией, что и `latest.log`. Формат — ECS через `log4j-layout-template-json` (проверить,
-  есть ли модуль в зависимостях Paper; если нет — добавить).
-- **Поля.** `@timestamp`, `log.level`, `log.logger`, `message` без `§` и ANSI, `process.thread.name`, `tessera.plugin`,
-  `tessera.region.world` / `tessera.region.chunk_x` / `tessera.region.chunk_z`, `tessera.global` (context data из T-052), `error.type` / `error.message` / `error.stack_trace`.
-- **Готово, когда.** Логи читаются `jq` без ошибок, промтейл/Filebeat разбирает поля без своих regex. Описать в README.
-
----
-
 ## P3 — потом
 
+- **T-054** Логи в JSON для Loki/ELK (отложено, пока нет Grafana/ELK): стиль `json` в `TesseraLogStyle` (одна строка JSON на событие
+  в stdout) и `-Dtessera.log.json-file=true` → `logs/latest.json` с ротацией как у `latest.log`. ECS через `log4j-layout-template-json`;
+  поля `@timestamp`, `log.level`, `log.logger`, `message` без `§`/ANSI, `process.thread.name`, `tessera.plugin`, context data из T-052
+  (`tessera.region.*`, `tessera.global`), `error.type` / `error.message` / `error.stack_trace`. Готово, когда `jq` и Promtail/Filebeat
+  разбирают логи без своих regex; описать в README.
 - **T-060** Автоматический мёрж upstream Folia ([#468](https://github.com/PaperMC/Folia/issues/468)): workflow раз в неделю
   делает ветку `upstream-sync`, мёржит PaperMC/Folia, прогоняет `applyAllPatches` и сборку и открывает PR.
 - **T-061** Сообщения чанкового API ([#96](https://github.com/PaperMC/Folia/issues/96)): понятные ошибки при вызове
