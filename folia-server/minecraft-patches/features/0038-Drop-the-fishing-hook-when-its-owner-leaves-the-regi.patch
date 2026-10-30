@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Fri, 30 Oct 2026 10:01:00 +0300
+Subject: [PATCH] Drop the fishing hook when its owner leaves the region
+
+
+diff --git a/net/minecraft/world/entity/projectile/FishingHook.java b/net/minecraft/world/entity/projectile/FishingHook.java
+index 20deed9e67bd4b7e0ed2c5f8fafe58e2ee677844..f995a55f29eca5d516bcb386f9c5ce8d75c9180c 100644
+--- a/net/minecraft/world/entity/projectile/FishingHook.java
++++ b/net/minecraft/world/entity/projectile/FishingHook.java
+@@ -273,6 +273,11 @@ public class FishingHook extends Projectile {
+     private boolean shouldStopFishing(final Player owner) {
+         // Folia start - region threading
+         if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(owner)) {
++            // Tessera start - owner left this region or world, drop the hook like vanilla does when it gets too far
++            if (!this.level().isClientSide() && ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++                this.discard(org.bukkit.event.entity.EntityRemoveEvent.Cause.DESPAWN);
++            }
++            // Tessera end - owner left this region or world, drop the hook like vanilla does when it gets too far
+             return true;
+         }
+         // Folia end - region threading
+@@ -642,6 +647,11 @@ public class FishingHook extends Projectile {
+     private void updateOwnerInfo(final @Nullable FishingHook hook) {
+         Player owner = this.getPlayerOwner();
+         if (owner != null) {
++            // Tessera start - only clear the owner's hook from the owner's thread, and only if it is still this hook
++            if (hook == null && (owner.fishing != this || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(owner))) {
++                return;
++            }
++            // Tessera end - only clear the owner's hook from the owner's thread, and only if it is still this hook
+             owner.fishing = hook;
+         }
+     }
+diff --git a/net/minecraft/world/item/FishingRodItem.java b/net/minecraft/world/item/FishingRodItem.java
+index 33d0dae9a1e132d220148b24b508795b6b13ec77..e959e06b2a6664a6d2f97931c7a32a3b5f1e74c8 100644
+--- a/net/minecraft/world/item/FishingRodItem.java
++++ b/net/minecraft/world/item/FishingRodItem.java
+@@ -21,6 +21,12 @@ public class FishingRodItem extends Item {
+     @Override
+     public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
+         ItemStack itemStack = player.getItemInHand(hand);
++        // Tessera start - forget a hook that was removed or stayed behind in another region
++        if (player.fishing != null && !level.isClientSide()
++            && (player.fishing.isRemoved() || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player.fishing))) {
++            player.fishing = null;
++        }
++        // Tessera end - forget a hook that was removed or stayed behind in another region
+         if (player.fishing != null) {
+             if (!level.isClientSide()) {
+                 int dmg = player.fishing.retrieve(itemStack, hand); // Paper - Add hand parameter to PlayerFishEvent
