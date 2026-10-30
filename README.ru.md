@@ -72,7 +72,7 @@ java -Xms4G -Xmx4G -jar server.jar --nogui   # server.jar — скачанный
 
 Стиль логов в консоли задаётся `-Dtessera.log.style=<стиль>` или переменной окружения `TESSERA_LOG_STYLE`:
 `pretty` (по умолчанию, `12:34:56 INFO  [world 12,-4] [Plugin] сообщение`, с регионом, из которого пришла строка) или `classic` (формат Paper, `[12:34:56 INFO]: [Plugin] сообщение`).
-`logs/latest.log` в любом стиле пишется в формате Paper.
+Стектрейсы в `pretty` сокращены (кадры reflection и netty свёрнуты, кадры плагинов помечены именем jar); `logs/latest.log` в любом стиле пишется в формате Paper с полными трейсами.
 Цвет управляется `-Dterminal.ansi`; если он не задан, `NO_COLOR=1` выключает цвет, а `FORCE_COLOR=1` включает его,
 когда консоль не TTY (контейнер Pterodactyl определяется сам).
 

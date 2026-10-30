@@ -1,0 +1,249 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:29:18 +0300
+Subject: [PATCH] Shorten stack traces in the pretty console style
+
+
+diff --git a/src/log4jPlugins/java/io/papermc/paper/console/TesseraThrowableConverter.java b/src/log4jPlugins/java/io/papermc/paper/console/TesseraThrowableConverter.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..519de227661c3bb22492109d336ed6c23c534a0e
+--- /dev/null
++++ b/src/log4jPlugins/java/io/papermc/paper/console/TesseraThrowableConverter.java
+@@ -0,0 +1,219 @@
++package io.papermc.paper.console;
++
++import java.util.Collections;
++import java.util.IdentityHashMap;
++import java.util.LinkedHashSet;
++import java.util.Set;
++import net.minecrell.terminalconsole.TerminalConsoleAppender;
++import org.apache.logging.log4j.core.LogEvent;
++import org.apache.logging.log4j.core.config.Configuration;
++import org.apache.logging.log4j.core.config.plugins.Plugin;
++import org.apache.logging.log4j.core.pattern.ConverterKeys;
++import org.apache.logging.log4j.core.pattern.LogEventPatternConverter;
++import org.apache.logging.log4j.core.pattern.PatternConverter;
++
++// Tessera start - short stack traces in the pretty console style
++/**
++ * {@code %tesseraEx} prints the event's throwable for the {@code pretty} console style. Runs of reflection, netty,
++ * log4j, scheduler and lambda frames fold into one line, frames from plugin jars are marked with the jar name, and
++ * when a trace has plugin frames everything below the last of them folds into {@code ... N more}. The full trace
++ * stays in {@code logs/latest.log}.
++ */
++@Plugin(name = "tesseraEx", category = PatternConverter.CATEGORY)
++@ConverterKeys({"tesseraEx"})
++public final class TesseraThrowableConverter extends LogEventPatternConverter {
++
++    private static final String RESET = "\u001B[0m";
++    private static final String GRAY = "\u001B[90m";
++    private static final String PLUGIN = "\u001B[1;97m";
++    private static final String NL = System.lineSeparator();
++    // frames kept below the last plugin frame, so the caller is visible
++    private static final int PLUGIN_CONTEXT = 1;
++    // frames kept per throwable when the trace has no plugin frames
++    private static final int MAX_FRAMES = 25;
++    private static final String[][] NOISE = {
++        {"java.lang.reflect.", "reflection"},
++        {"jdk.internal.reflect.", "reflection"},
++        {"sun.reflect.", "reflection"},
++        {"jdk.proxy", "reflection"},
++        {"io.netty.", "netty"},
++        {"org.apache.logging.", "log4j"},
++        {"io.papermc.paper.threadedregions.scheduler.", "scheduler"},
++        {"ca.spottedleaf.concurrentutil.", "scheduler"},
++        {"java.util.concurrent.", "scheduler"},
++    };
++
++    private TesseraThrowableConverter() {
++        super("tesseraEx", "throwable");
++    }
++
++    public static TesseraThrowableConverter newInstance(final Configuration config, final String[] options) {
++        return new TesseraThrowableConverter();
++    }
++
++    @Override
++    public boolean handlesThrowable() {
++        return true;
++    }
++
++    @Override
++    public void format(final LogEvent event, final StringBuilder toAppendTo) {
++        final Throwable thrown = event.getThrown();
++        if (thrown == null) {
++            return;
++        }
++        final boolean ansi = TerminalConsoleAppender.isAnsiSupported();
++        final String headerColor = ansi ? TesseraStyleConverter.levelColor(event.getLevel()) : null;
++        final boolean trimToPlugins = hasPluginFrame(thrown, Collections.newSetFromMap(new IdentityHashMap<>()));
++        new Printer(toAppendTo, ansi, headerColor, trimToPlugins).print(thrown, null, "", "");
++    }
++
++    private static final class Printer {
++        private final StringBuilder out;
++        private final boolean ansi;
++        private final String headerColor;
++        private final boolean trimToPlugins;
++        private final Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
++
++        Printer(final StringBuilder out, final boolean ansi, final String headerColor, final boolean trimToPlugins) {
++            this.out = out;
++            this.ansi = ansi;
++            this.headerColor = headerColor;
++            this.trimToPlugins = trimToPlugins;
++        }
++
++        void print(final Throwable throwable, final StackTraceElement[] enclosing, final String caption, final String indent) {
++            if (!this.seen.add(throwable)) {
++                this.out.append(indent).append(caption).append("[CIRCULAR REFERENCE: ").append(throwable).append(']').append(NL);
++                return;
++            }
++            this.out.append(indent);
++            this.colored(this.headerColor, caption + throwable);
++            this.out.append(NL);
++
++            final StackTraceElement[] frames = throwable.getStackTrace();
++            int unique = frames.length;
++            if (enclosing != null) {
++                for (int e = enclosing.length - 1; unique > 0 && e >= 0 && frames[unique - 1].equals(enclosing[e]); --e) {
++                    --unique;
++                }
++            }
++            final int shown;
++            if (this.trimToPlugins) {
++                int lastPlugin = -1;
++                for (int i = 0; i < unique; ++i) {
++                    if (isPluginFrame(frames[i])) {
++                        lastPlugin = i;
++                    }
++                }
++                shown = lastPlugin >= 0 ? Math.min(unique, lastPlugin + 1 + PLUGIN_CONTEXT) : Math.min(unique, MAX_FRAMES);
++            } else {
++                shown = Math.min(unique, MAX_FRAMES);
++            }
++
++            final String frameIndent = indent + "    ";
++            for (int i = 0; i < shown; ) {
++                final String noise = noiseKind(frames[i]);
++                if (noise == null) {
++                    this.frame(frameIndent, frames[i++]);
++                    continue;
++                }
++                final Set<String> kinds = new LinkedHashSet<>();
++                int end = i;
++                for (String kind; end < shown && (kind = noiseKind(frames[end])) != null; ++end) {
++                    kinds.add(kind);
++                }
++                if (end - i == 1) {
++                    this.frame(frameIndent, frames[i]);
++                } else {
++                    this.fold(frameIndent, "... " + (end - i) + " frames (" + String.join(", ", kinds) + ")");
++                }
++                i = end;
++            }
++            if (shown < frames.length) {
++                this.fold(frameIndent, "... " + (frames.length - shown) + " more");
++            }
++
++            for (final Throwable suppressed : throwable.getSuppressed()) {
++                this.print(suppressed, frames, "Suppressed: ", indent + "    ");
++            }
++            final Throwable cause = throwable.getCause();
++            if (cause != null) {
++                this.print(cause, frames, "Caused by: ", indent);
++            }
++        }
++
++        private void frame(final String indent, final StackTraceElement frame) {
++            this.out.append(indent);
++            final boolean plugin = isPluginFrame(frame);
++            final int start = this.out.length();
++            this.out.append("at ").append(frame.getClassName()).append('.').append(frame.getMethodName()).append('(');
++            if (frame.isNativeMethod()) {
++                this.out.append("Native Method");
++            } else if (frame.getFileName() == null) {
++                this.out.append("Unknown Source");
++            } else {
++                this.out.append(frame.getFileName());
++                if (frame.getLineNumber() >= 0) {
++                    this.out.append(':').append(frame.getLineNumber());
++                }
++            }
++            this.out.append(')');
++            if (plugin) {
++                this.out.append(" [").append(frame.getClassLoaderName()).append(']');
++            }
++            if (this.ansi) {
++                this.out.insert(start, plugin ? PLUGIN : GRAY).append(RESET);
++            }
++            this.out.append(NL);
++        }
++
++        private void fold(final String indent, final String text) {
++            this.out.append(indent);
++            this.colored(this.ansi ? GRAY : null, text);
++            this.out.append(NL);
++        }
++
++        private void colored(final String color, final String text) {
++            if (color == null) {
++                this.out.append(text);
++            } else {
++                this.out.append(color).append(text).append(RESET);
++            }
++        }
++    }
++
++    // Paper and Bukkit name plugin class loaders after the plugin jar
++    static boolean isPluginFrame(final StackTraceElement frame) {
++        final String loader = frame.getClassLoaderName();
++        return loader != null && loader.endsWith(".jar");
++    }
++
++    static String noiseKind(final StackTraceElement frame) {
++        final String className = frame.getClassName();
++        for (final String[] noise : NOISE) {
++            if (className.startsWith(noise[0])) {
++                return noise[1];
++            }
++        }
++        return className.contains("$$Lambda") ? "lambda" : null;
++    }
++
++    private static boolean hasPluginFrame(final Throwable throwable, final Set<Throwable> seen) {
++        if (throwable == null || !seen.add(throwable)) {
++            return false;
++        }
++        for (final StackTraceElement frame : throwable.getStackTrace()) {
++            if (isPluginFrame(frame)) {
++                return true;
++            }
++        }
++        for (final Throwable suppressed : throwable.getSuppressed()) {
++            if (hasPluginFrame(suppressed, seen)) {
++                return true;
++            }
++        }
++        return hasPluginFrame(throwable.getCause(), seen);
++    }
++}
++// Tessera end - short stack traces in the pretty console style
+diff --git a/src/main/resources/log4j2.xml b/src/main/resources/log4j2.xml
+index 33dae180b948bf3b6f5bf1da4b02376a3179137c..5a3f6617c1c94302224ef80787f9a793848b8245 100644
+--- a/src/main/resources/log4j2.xml
++++ b/src/main/resources/log4j2.xml
+@@ -21,11 +21,11 @@
+             <DefaultArbiter>
+                 <TerminalConsole name="TerminalConsole">
+                     <PatternLayout>
+-                        <LoggerNamePatternSelector defaultPattern="%tesseraStyle{%d{HH:mm:ss}}{time} %tesseraStyle{%-5level}{level} %tesseraStyle{%notEmpty{[%X{tessera.region}] }}{dim}%tesseraStyle{[%logger]}{logger} %highlightError{%msg%n%xEx{full}}">
++                        <LoggerNamePatternSelector defaultPattern="%tesseraStyle{%d{HH:mm:ss}}{time} %tesseraStyle{%-5level}{level} %tesseraStyle{%notEmpty{[%X{tessera.region}] }}{dim}%tesseraStyle{[%logger]}{logger} %highlightError{%msg}%n%tesseraEx">
+                             <!-- Log root, Minecraft, Mojang and Bukkit loggers without prefix -->
+                             <!-- Disable prefix for various plugins that bypass the plugin logger -->
+                             <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
+-                                          pattern="%tesseraStyle{%d{HH:mm:ss}}{time} %tesseraStyle{%-5level}{level} %tesseraStyle{%notEmpty{[%X{tessera.region}] }}{dim}%highlightError{%msg%n%xEx{full}}" />
++                                          pattern="%tesseraStyle{%d{HH:mm:ss}}{time} %tesseraStyle{%-5level}{level} %tesseraStyle{%notEmpty{[%X{tessera.region}] }}{dim}%highlightError{%msg}%n%tesseraEx" />
+                         </LoggerNamePatternSelector>
+                     </PatternLayout>
+                 </TerminalConsole>
