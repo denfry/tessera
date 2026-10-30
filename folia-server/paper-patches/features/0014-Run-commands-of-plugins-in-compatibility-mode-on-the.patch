@@ -1,0 +1,121 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:07:33 +0300
+Subject: [PATCH] Run commands of plugins in compatibility mode on the global
+ region thread
+
+
+diff --git a/src/main/java/io/papermc/paper/command/brigadier/bukkit/BukkitCommandNode.java b/src/main/java/io/papermc/paper/command/brigadier/bukkit/BukkitCommandNode.java
+index 5c52b1563d20d7e977a5bb958c18b19dec5c365a..6cffb5246fbd9824622053dd3cb24c4e0d681f5d 100644
+--- a/src/main/java/io/papermc/paper/command/brigadier/bukkit/BukkitCommandNode.java
++++ b/src/main/java/io/papermc/paper/command/brigadier/bukkit/BukkitCommandNode.java
+@@ -79,6 +79,15 @@ public class BukkitCommandNode extends LiteralCommandNode<CommandSourceStack> {
+             String content = context.getRange().get(context.getInput());
+             String[] args = org.apache.commons.lang3.StringUtils.split(content, ' '); // fix adjacent spaces (from console/plugins) causing empty array elements
+ 
++            // Tessera start - commands of plugins in compatibility mode run on the global region thread
++            final org.bukkit.plugin.Plugin compatPlugin = io.papermc.paper.threadedregions.TesseraCompat.compatOwner(this.command);
++            if (compatPlugin != null) {
++                final String[] commandArgs = Arrays.copyOfRange(args, 1, args.length);
++                io.papermc.paper.threadedregions.TesseraCompat.runCommand(compatPlugin, sender, content, () -> this.command.execute(sender, this.literal, commandArgs));
++                return 1;
++            }
++            // Tessera end - commands of plugins in compatibility mode run on the global region thread
++
+             // Note: we don't return the result of target.execute as thats success / failure, we return handled (true) or not handled (false)
+             this.command.execute(sender, this.literal, Arrays.copyOfRange(args, 1, args.length));
+ 
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index 3273c64a3ca0e3943d4a5b1aaee84385ec4893a3..e06775ccffb5e523c2661d7b1e359220b3cfbcea 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -10,6 +10,13 @@ import java.util.List;
+ import java.util.Locale;
+ import java.util.Map;
+ import java.util.Set;
++import io.papermc.paper.plugin.provider.classloader.ConfiguredPluginClassLoader;
++import net.kyori.adventure.text.Component;
++import net.kyori.adventure.text.format.NamedTextColor;
++import org.bukkit.Bukkit;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import org.bukkit.command.PluginIdentifiableCommand;
+ import org.bukkit.plugin.Plugin;
+ import org.slf4j.Logger;
+ import org.yaml.snakeyaml.Yaml;
+@@ -19,8 +26,8 @@ import org.yaml.snakeyaml.error.YAMLException;
+  * Compatibility mode for plugins that are not marked as supporting Folia.
+  * <p>
+  * Plugins listed in {@code tessera.yml} are loaded even without {@code folia-supported: true}, and their
+- * {@link org.bukkit.scheduler.BukkitScheduler} tasks run on the global region thread, borrowing the regions they
+- * touch (see TesseraRegionLoan). Plugins that are marked as supporting Folia are not affected.
++ * {@link org.bukkit.scheduler.BukkitScheduler} tasks and commands run on the global region thread, borrowing the
++ * regions they touch (see TesseraRegionLoan). Plugins that are marked as supporting Folia are not affected.
+  */
+ public final class TesseraCompat {
+ 
+@@ -30,9 +37,9 @@ public final class TesseraCompat {
+ 
+         compat:
+           # Plugins that are not marked as supporting Folia (folia-supported: true) but are loaded anyway,
+-          # by plugin name, or "*" for all of them. Their BukkitScheduler tasks run on the global region
+-          # thread and can use blocks and entities in loaded chunks: the regions they touch are paused
+-          # for the duration of the task.
++          # by plugin name, or "*" for all of them. Their BukkitScheduler tasks and commands run on the
++          # global region thread and can use blocks and entities in loaded chunks: the regions they touch
++          # are paused for the duration of the task.
+           plugins: []
+         """;
+ 
+@@ -98,7 +105,7 @@ public final class TesseraCompat {
+             return false;
+         }
+         LOGGER.warn("Loading {} in compatibility mode: it is not marked as supporting Folia. "
+-            + "Its scheduler tasks run on the global region thread and pause the regions they touch.", pluginName);
++            + "Its scheduler tasks and commands run on the global region thread and pause the regions they touch.", pluginName);
+         return true;
+     }
+ 
+@@ -108,4 +115,42 @@ public final class TesseraCompat {
+     public static boolean isCompat(final Plugin plugin) {
+         return !plugin.getPluginMeta().isFoliaSupported();
+     }
++
++    /**
++     * Returns the plugin in compatibility mode that owns the command, or {@code null}. Commands registered without
++     * {@link PluginIdentifiableCommand} are matched by the class loader of their class.
++     */
++    public static Plugin compatOwner(final Command command) {
++        if (!enabled()) {
++            return null;
++        }
++        final Plugin plugin;
++        if (command instanceof PluginIdentifiableCommand identifiable) {
++            plugin = identifiable.getPlugin();
++        } else if (command.getClass().getClassLoader() instanceof ConfiguredPluginClassLoader loader) {
++            plugin = loader.getPlugin();
++        } else {
++            plugin = null;
++        }
++        return plugin != null && isCompat(plugin) ? plugin : null;
++    }
++
++    /**
++     * Runs a command of a plugin in compatibility mode on the global region thread, where it can borrow regions.
++     * From another thread (a player or a command block in a region), the command runs in the next global tick.
++     */
++    public static void runCommand(final Plugin plugin, final CommandSender sender, final String commandLine, final Runnable execute) {
++        if (RegionizedServer.isGlobalTickThread()) {
++            TesseraRegionLoan.runInScope(execute);
++            return;
++        }
++        Bukkit.getGlobalRegionScheduler().execute(plugin, () -> {
++            try {
++                TesseraRegionLoan.runInScope(execute);
++            } catch (final Throwable thr) {
++                LOGGER.error("Command '{}' of {} failed for {}", commandLine, plugin.getName(), sender.getName(), thr);
++                sender.sendMessage(Component.text("An internal error occurred while attempting to perform this command", NamedTextColor.RED));
++            }
++        });
++    }
+ }

@@ -115,7 +115,7 @@
 <pre>java -Xms4G -Xmx4G -jar server.jar --nogui</pre>
   <p>По умолчанию загружаются только плагины с <code>folia-supported: true</code>; остальные можно перечислить в
     <code>compat.plugins</code> в <code>config/tessera.yml</code>, и они запустятся в режиме совместимости:
-    задачи <code>BukkitScheduler</code> выполняются на потоке глобального региона. В Paper API уже есть планировщики Folia
+    задачи <code>BukkitScheduler</code> и команды выполняются на потоке глобального региона. В Paper API уже есть планировщики Folia
     (<code>getRegionScheduler()</code>, <code>getGlobalRegionScheduler()</code>,
     <code>getAsyncScheduler()</code>, <code>Entity#getScheduler()</code>), так что плагин на них
     работает и на Paper, и на Tessera без изменений. Плагины, которые мы запускали на Tessera, перечислены в
