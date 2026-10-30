@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:19:48 +0300
+Subject: [PATCH] Let plugins in compatibility mode use synchronous teleport
+
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index e06775ccffb5e523c2661d7b1e359220b3cfbcea..1345bb6102683c51ec84a9b6f328e8f596cc3a28 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -43,6 +43,8 @@ public final class TesseraCompat {
+           plugins: []
+         """;
+ 
++    private static final StackWalker STACK_WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
++
+     private static volatile Set<String> plugins = Set.of();
+     private static volatile boolean allPlugins;
+ 
+@@ -135,6 +137,19 @@ public final class TesseraCompat {
+         return plugin != null && isCompat(plugin) ? plugin : null;
+     }
+ 
++    /**
++     * Returns whether code of a plugin in compatibility mode is on the call stack. Only for paths that would throw
++     * otherwise, such as APIs Folia has no synchronous variant of: walking the stack is not free.
++     */
++    public static boolean calledByCompatPlugin() {
++        if (!enabled()) {
++            return false;
++        }
++        return STACK_WALKER.walk(frames -> frames.anyMatch(frame ->
++            frame.getDeclaringClass().getClassLoader() instanceof ConfiguredPluginClassLoader loader
++                && loader.getPlugin() != null && isCompat(loader.getPlugin())));
++    }
++
+     /**
+      * Runs a command of a plugin in compatibility mode on the global region thread, where it can borrow regions.
+      * From another thread (a player or a command block in a region), the command runs in the next global tick.
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
+index bbf0a2a3266f39519d37cefae81ab871eaa90d20..22adb987cb75f807082df1b328b7fd4bb210ad6c 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
+@@ -324,6 +324,11 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
+     }
+ 
+     protected boolean teleport0(Location location, TeleportCause cause, TeleportFlag... flags) {
++        // Tessera start - plugins in compatibility mode teleport through teleportAsync
++        if (io.papermc.paper.threadedregions.TesseraCompat.calledByCompatPlugin()) {
++            return this.tesseraTeleportLater(location, cause, flags);
++        }
++        // Tessera end - plugins in compatibility mode teleport through teleportAsync
+         // Folia start - region threading
+         if (true) {
+             throw new UnsupportedOperationException("Must use teleportAsync while in region threading");
+@@ -356,6 +361,14 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
+         )) != null;
+     }
+ 
++    // Tessera start - plugins in compatibility mode teleport through teleportAsync
++    // The next tick of the entity: a teleport right away is unsafe in some events, such as PlayerJoinEvent (T-067)
++    protected final boolean tesseraTeleportLater(final Location location, final TeleportCause cause, final TeleportFlag... flags) {
++        final Location to = location.clone();
++        return this.taskScheduler.schedule((Entity nmsEntity) -> nmsEntity.getBukkitEntity().teleportAsync(to, cause, flags), null, 1L);
++    }
++    // Tessera end - plugins in compatibility mode teleport through teleportAsync
++
+     public static net.minecraft.world.entity.Relative deltaRelativeToNMS(TeleportFlag.Relative apiFlag) {
+         return switch (apiFlag) {
+             case VELOCITY_X -> net.minecraft.world.entity.Relative.DELTA_X;
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index 5b202a3fcb618c8bac860d88cbef0dc71bf92cde..b3bd2e157c6c6fa502a87aab1ac1c2ddc9296f7a 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -1342,6 +1342,14 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+ 
+     @Override
+     protected boolean teleport0(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, io.papermc.paper.entity.TeleportFlag... flags) {
++        // Tessera start - plugins in compatibility mode teleport through teleportAsync
++        if (io.papermc.paper.threadedregions.TesseraCompat.calledByCompatPlugin()) {
++            if (this.getHandle().connection == null) {
++                return false;
++            }
++            return this.tesseraTeleportLater(location, cause, flags);
++        }
++        // Tessera end - plugins in compatibility mode teleport through teleportAsync
+         // Folia start - region threading
+         if (true) {
+             throw new UnsupportedOperationException("Must use teleportAsync while in region threading");

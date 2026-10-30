@@ -49,6 +49,7 @@ patches are not listed here.
 | [0012-Add-compatibility-mode-for-plugins-not-marked-as-Fol](folia-server/paper-patches/features/0012-Add-compatibility-mode-for-plugins-not-marked-as-Fol.patch) | API | Plugins listed under `compat.plugins` in `tessera.yml` load without `folia-supported: true`; their `BukkitScheduler` tasks run on the global region thread (sync) or the async pool | — |
 | [0013-Let-tasks-of-plugins-in-compatibility-mode-borrow-re](folia-server/paper-patches/features/0013-Let-tasks-of-plugins-in-compatibility-mode-borrow-re.patch) | region threading | Failed thread checks inside such a task borrow the owning region instead of throwing | — |
 | [0014-Run-commands-of-plugins-in-compatibility-mode-on-the](folia-server/paper-patches/features/0014-Run-commands-of-plugins-in-compatibility-mode-on-the.patch) | commands | Commands of such plugins run on the global region thread with region loans; from a region thread they run in the next global tick | — |
+| [0015-Let-plugins-in-compatibility-mode-use-synchronous-te](folia-server/paper-patches/features/0015-Let-plugins-in-compatibility-mode-use-synchronous-te.patch) | teleport | Synchronous `Entity#teleport` called by such a plugin returns `true` and runs as `teleportAsync` in the next tick of the entity | — |
 
 Build branding: the server reports itself as **Tessera** (`Brand-Name`, `/version`). `Brand-Id` stays
 `papermc:folia` so plugins that check for Folia keep working.
