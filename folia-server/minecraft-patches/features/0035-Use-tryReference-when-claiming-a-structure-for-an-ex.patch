@@ -1,0 +1,22 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:31:27 +0300
+Subject: [PATCH] Use tryReference when claiming a structure for an exploration
+ map
+
+canBeReferenced throws on Folia, so rolling a treasure map inside the
+destination structure failed.
+
+diff --git a/net/minecraft/world/level/storage/loot/functions/ExplorationMapFunction.java b/net/minecraft/world/level/storage/loot/functions/ExplorationMapFunction.java
+index 058afc8fa19935df1abc60a5a7aab34d3797ae97..346982c53c535122e9bb893e3407fe5302ce3fd5 100644
+--- a/net/minecraft/world/level/storage/loot/functions/ExplorationMapFunction.java
++++ b/net/minecraft/world/level/storage/loot/functions/ExplorationMapFunction.java
+@@ -123,7 +123,7 @@ public class ExplorationMapFunction extends LootItemConditionalFunction {
+     private void claimStructureAt(final ServerLevel level, final BlockPos pos) {
+         StructureManager structureManager = level.structureManager();
+         StructureStart start = structureManager.getStructureAt(pos, this.destination);
+-        if (start.isValid() && start.canBeReferenced()) {
++        if (start.isValid() && start.tryReference()) { // Tessera - canBeReferenced() throws on Folia, check and take the reference at once
+             structureManager.addReference(start);
+         }
+     }

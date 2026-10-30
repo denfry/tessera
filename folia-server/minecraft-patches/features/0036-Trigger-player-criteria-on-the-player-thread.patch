@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:31:27 +0300
+Subject: [PATCH] Trigger player criteria on the player thread
+
+The shooter of a target block, the player who cured a zombie villager
+and the thrower of a picked up item can be in another region.
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index a66f01754046bd9e3946552cac794b2f624214f9..6d2ee6d43ec53304711feed6dbef3f4b3aa3101a 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -4036,7 +4036,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+ 
+     public void onItemPickup(final ItemEntity entity) {
+         if (EntityReference.getEntity(entity.thrower, this.level()::getGlobalPlayerByUUID, Entity.class) instanceof ServerPlayer serverPlayer) { // Paper - check global player list where appropriate
+-            CriteriaTriggers.THROWN_ITEM_PICKED_UP_BY_ENTITY.trigger(serverPlayer, entity.getItem(), this);
++            // Tessera start - the thrower can be in another region
++            final ItemStack picked = entity.getItem().copy();
++            serverPlayer.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer thrower) -> CriteriaTriggers.THROWN_ITEM_PICKED_UP_BY_ENTITY.trigger(thrower, picked, this));
++            // Tessera end - the thrower can be in another region
+         }
+     }
+ 
+diff --git a/net/minecraft/world/entity/monster/zombie/ZombieVillager.java b/net/minecraft/world/entity/monster/zombie/ZombieVillager.java
+index 60c66dba6c868578a49f468da70c1abe973f64f2..884862a33b09d81bb2d513f8a1522ca606af06da 100644
+--- a/net/minecraft/world/entity/monster/zombie/ZombieVillager.java
++++ b/net/minecraft/world/entity/monster/zombie/ZombieVillager.java
+@@ -267,7 +267,7 @@ public class ZombieVillager extends Zombie implements VillagerDataHolder {
+                 if (this.conversionStarter != null) {
+                     Player player = level.getGlobalPlayerByUUID(this.conversionStarter); // Paper - check global player list where appropriate
+                     if (player instanceof ServerPlayer serverPlayer) {
+-                        CriteriaTriggers.CURED_ZOMBIE_VILLAGER.trigger(serverPlayer, this, villager);
++                        serverPlayer.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer curer) -> CriteriaTriggers.CURED_ZOMBIE_VILLAGER.trigger(curer, this, villager)); // Tessera - the player can be in another region
+                         level.onReputationEvent(ReputationEventType.ZOMBIE_VILLAGER_CURED, player, villager);
+                     }
+                 }
+diff --git a/net/minecraft/world/level/block/TargetBlock.java b/net/minecraft/world/level/block/TargetBlock.java
+index 11d59109b8b1c984af036e1edafbc2868573787d..0c36fe84752a2980685ceea6239630d918e93b9c 100644
+--- a/net/minecraft/world/level/block/TargetBlock.java
++++ b/net/minecraft/world/level/block/TargetBlock.java
+@@ -40,8 +40,12 @@ public class TargetBlock extends Block {
+     private static void awardTargetHitCriteria(Projectile projectile, BlockHitResult hitResult, int outputStrength) {
+         // Paper end - Add TargetHitEvent
+         if (projectile.getOwner() instanceof ServerPlayer playerOwner) {
+-            playerOwner.awardStat(Stats.TARGET_HIT);
+-            CriteriaTriggers.TARGET_BLOCK_HIT.trigger(playerOwner, projectile, hitResult.getLocation(), outputStrength);
++            // Tessera start - award on the thread of the player, the shooter can be in another region
++            playerOwner.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer player) -> {
++                player.awardStat(Stats.TARGET_HIT);
++                CriteriaTriggers.TARGET_BLOCK_HIT.trigger(player, projectile, hitResult.getLocation(), outputStrength);
++            });
++            // Tessera end - award on the thread of the player, the shooter can be in another region
+         }
+     }
+ 

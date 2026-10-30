@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:31:27 +0300
+Subject: [PATCH] Consume the respawn anchor charge on respawn
+
+The region threaded respawn never ran the charge consumer, so respawn
+anchors were never depleted. Consume the charge on the region that
+owns the anchor, re-reading the block there.
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index a76215f00a0af8d35c2f08e543e3215d5c3a3613..396247a72dd94abde2a64c7492ad7a23fb83067c 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -1833,6 +1833,19 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                     boolean isRespawnAnchor = respawnWorld.getBlockState(respawnConfig.respawnData.pos()).is(net.minecraft.world.level.block.Blocks.RESPAWN_ANCHOR);
+                     boolean isBed = respawnWorld.getBlockState(respawnConfig.respawnData.pos()).is(net.minecraft.tags.BlockTags.BEDS);
+                     usedRespawnAnchor[0] = !alive && isRespawnAnchor;
++                    // Tessera start - consume the anchor charge, on the region that owns the anchor
++                    if (usedRespawnAnchor[0] && spawnPos.consumeAnchorCharge() != null) {
++                        final BlockPos anchorPos = respawnConfig.respawnData.pos();
++                        io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(
++                            respawnWorld, anchorPos.getX() >> 4, anchorPos.getZ() >> 4, () -> {
++                                final BlockState anchorState = respawnWorld.getBlockState(anchorPos);
++                                if (anchorState.getBlock() instanceof RespawnAnchorBlock && anchorState.getValue(RespawnAnchorBlock.CHARGE) > 0) {
++                                    respawnWorld.setBlockAndUpdate(anchorPos, anchorState.setValue(RespawnAnchorBlock.CHARGE, anchorState.getValue(RespawnAnchorBlock.CHARGE) - 1));
++                                }
++                            }
++                        );
++                    }
++                    // Tessera end - consume the anchor charge, on the region that owns the anchor
+ 
+                     // finished now, pass the location on
+                     spawnPosComplete.complete(

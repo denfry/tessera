@@ -1,0 +1,48 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:31:26 +0300
+Subject: [PATCH] Make command storage thread-safe
+
+Storage text components are resolved on region threads. Use a
+concurrent map for the namespaces and guard each container with its
+own monitor, which is also the monitor saved data is encoded under.
+
+diff --git a/net/minecraft/world/level/storage/CommandStorage.java b/net/minecraft/world/level/storage/CommandStorage.java
+index c99b9001cefdf6992dfcbe90294f697fe3b2eb64..1ca16cb39bf999caaf995fe932b4a09a62bb9713 100644
+--- a/net/minecraft/world/level/storage/CommandStorage.java
++++ b/net/minecraft/world/level/storage/CommandStorage.java
+@@ -15,7 +15,7 @@ import org.jspecify.annotations.Nullable;
+ 
+ public class CommandStorage {
+     private static final String COMMAND_STORAGE = "command_storage";
+-    private final Map<String, CommandStorage.Container> namespaces = new HashMap<>();
++    private final Map<String, CommandStorage.Container> namespaces = new java.util.concurrent.ConcurrentHashMap<>(); // Tessera - thread-safe command storage
+     private final SavedDataStorage savedDataStorage;
+ 
+     public CommandStorage(final SavedDataStorage savedDataStorage) {
+@@ -81,12 +81,12 @@ public class CommandStorage {
+             );
+         }
+ 
+-        public CompoundTag get(final String id) {
++        public synchronized CompoundTag get(final String id) { // Tessera - thread-safe command storage
+             CompoundTag result = this.storage.get(id);
+             return result != null ? result : new CompoundTag();
+         }
+ 
+-        public void put(final String id, final CompoundTag contents) {
++        public synchronized void put(final String id, final CompoundTag contents) { // Tessera - thread-safe command storage
+             if (contents.isEmpty()) {
+                 this.storage.remove(id);
+             } else {
+@@ -96,8 +96,8 @@ public class CommandStorage {
+             this.setDirty();
+         }
+ 
+-        public Stream<Identifier> getKeys(final String namespace) {
+-            return this.storage.keySet().stream().map(p -> Identifier.fromNamespaceAndPath(namespace, p));
++        public synchronized Stream<Identifier> getKeys(final String namespace) { // Tessera - thread-safe command storage
++            return java.util.List.copyOf(this.storage.keySet()).stream().map(p -> Identifier.fromNamespaceAndPath(namespace, p));
+         }
+     }
+ }
