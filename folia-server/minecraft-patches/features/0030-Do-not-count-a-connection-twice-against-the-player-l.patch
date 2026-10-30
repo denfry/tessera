@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:09:57 +0300
+Subject: [PATCH] Do not count a connection twice against the player limit
+
+The login check runs again in the configuration phase with the same
+connection, which was already counted, so the last free slot was
+refused with server_full.
+
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index 652a69d1f76a94363a0dd878da41ac78cdb94855..bbfa502da63063ba6cc62651cef7339bea867059 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -192,6 +192,11 @@ public abstract class PlayerList {
+ 
+     private boolean countConnection(Connection conn, int limit) {
+         synchronized (this.connectionsStateLock) {
++            // Tessera start - the login check runs again in the configuration phase, do not count the connection twice
++            if (this.usersCountedAgainstLimit.contains(conn)) {
++                return true;
++            }
++            // Tessera end - the login check runs again in the configuration phase, do not count the connection twice
+             int count = this.usersCountedAgainstLimit.size();
+             if (count >= limit) {
+                 return false;
