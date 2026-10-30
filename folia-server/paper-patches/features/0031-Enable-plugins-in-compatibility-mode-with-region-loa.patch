@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 13:03:28 +0300
+Subject: [PATCH] Enable plugins in compatibility mode with region loans
+
+Runs onEnable of plugins in compatibility mode on the startup thread as
+if on the global tick, so that they can read and change the world.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index eb7aa1508659fed99954fc02900b2561d96add6f..d2c76aa11e5ae695a2baf0d9c41e7600cf83af2c 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -568,6 +568,12 @@ public final class CraftServer implements Server {
+ 
+         for (Plugin plugin : plugins) {
+             if ((!plugin.isEnabled()) && (plugin.getDescription().getLoad() == type)) {
++                // Tessera start - onEnable of plugins in compatibility mode can use the world
++                if (io.papermc.paper.threadedregions.TesseraCompat.isCompat(plugin)) {
++                    io.papermc.paper.threadedregions.TesseraRegionLoan.runOnStartupThread(() -> this.enablePlugin(plugin));
++                    continue;
++                }
++                // Tessera end - onEnable of plugins in compatibility mode can use the world
+                 this.enablePlugin(plugin);
+             }
+         }

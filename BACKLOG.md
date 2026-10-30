@@ -187,12 +187,6 @@ by an option and only for listed plugins. Plugins written against the Folia API 
 - Remaining: `MinecraftServer#execute` / `MCUtil.MAIN_EXECUTOR` (FAWE adds tickets through it), `Server#getTickTimes`
   and `getAverageTickTime` off the region thread (TabTPS shows MSPT 0 and `Long.MAX_VALUE`).
 
-#### T-108 Compatibility-mode plugin's `onEnable` touches the world
-- Multiverse-Core on startup reads blocks at the spawn point and changes world settings. `onEnable` runs on the
-  server thread before the region scheduler starts: checks fail, and a synchronous chunk load there would hang.
-- Options: enable compatibility-mode plugins in the first global tick (inside a borrow scope) and keep players out until
-  then; or allow the server thread to run chunk tasks itself before the scheduler starts.
-
 ### B. Lag attribution (T-110)
 
 Builds on T-003 (per-region report and MBean).
@@ -303,3 +297,4 @@ Folia regions are already isolated, the next step is spreading them across proce
 | Not reproducible on 26.3 or already fixed, T-030: #334 (`BabyFollowAdult`, patch 0016), #152 (fishing hook, patch 0038), #327 (`PlayerList.remove` no longer ticks the player), #199 spectator path (Folia checks the camera). #381 and the log of #203: logs expired, the title of #381 points to a plugin calling `getEntities` off-region. `DragonFireball` needs no check: the gap between regions is wider than its search box | #334, #152, #327, #381 | — |
 | Villager behaviours do not wait for POI data on the region thread: `PoiCompetitorScan`, `AssignProfessionFromJobSite`, `YieldJobSite` and `ValidateNearbyPoi` skip the tick when the POI chunk is not loaded and keep the memory. `performance.poi-searches-load-chunks` in `config/tessera.yml` (default `true`, vanilla) keeps the `AcquirePoi` search off the disk. Checked: 4 villagers took 4 lecterns in both modes, no errors. The stall itself was not measured, T-031 | #292 | 0059 / paper 0030 |
 | Lock contention: no hot monitor found, no patch. JFR with thresholds of 1 ms, 50 idle bots in about 40 regions, 6 region threads, 2 minutes: 0.07 s in monitors on region threads, 2.7 s in `ThreadedTicketLevelPropagator.await`, 0.4 s in `ThreadedRegionizer` and the rest is the scheduler waiting for work. Not covered: bots do not build or fight and no plugins were loaded, so re-check on a live profile, T-032 | #291 | — |
+| Compatibility-mode plugins can use the world in `onEnable`: the startup thread counts as the global tick and borrows regions until `RegionizedServer#init`. Multiverse-Core 5.8.2 loads its config and worlds, `mv tp` to the default and a second world works after a restart, T-108 | — | 0060 / paper 0031 |

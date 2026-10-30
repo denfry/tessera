@@ -1,0 +1,103 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 13:03:28 +0300
+Subject: [PATCH] Let the startup thread borrow regions for plugins in
+ compatibility mode
+
+onEnable runs on the startup thread, which owns no region and is not the
+global tick thread, so a plugin in compatibility mode that reads blocks
+or changes world settings there failed the thread checks. Multiverse-Core
+lost its config and every world this way.
+
+No region ticks before RegionizedServer#init, so the startup thread can
+take the place of the global tick while such a plugin enables: it counts
+as the global tick thread and borrows regions like tasks of these
+plugins do. Chunks that are not loaded are loaded the same way.
+
+diff --git a/io/papermc/paper/threadedregions/TesseraRegionLoan.java b/io/papermc/paper/threadedregions/TesseraRegionLoan.java
+index 9f6f3f852729e354a5260cde7f7d5e6c80d206b6..7bca1f35eb1d46b20299eba6e4faebbd1c9d2889 100644
+--- a/io/papermc/paper/threadedregions/TesseraRegionLoan.java
++++ b/io/papermc/paper/threadedregions/TesseraRegionLoan.java
+@@ -56,6 +56,24 @@ public final class TesseraRegionLoan {
+         }
+     }
+ 
++    /**
++     * Runs code of a plugin on the startup thread as if it ran on the global tick, with region loans allowed. Regions
++     * do not tick before {@link RegionizedServer#init()}, so nothing competes for them. Once the server has started,
++     * or when nested, just runs the code.
++     */
++    public static void runOnStartupThread(final Runnable run) {
++        if (RegionizedServer.getInstance().isStarted() || TickRegionScheduler.tesseraGetStartupThread() != null) {
++            run.run();
++            return;
++        }
++        TickRegionScheduler.tesseraSetStartupThread(Thread.currentThread());
++        try {
++            runInScope(run);
++        } finally {
++            TickRegionScheduler.tesseraSetStartupThread(null);
++        }
++    }
++
+     /**
+      * Returns whether the current thread runs a task inside {@link #runInScope(Runnable)}.
+      */
+diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+index 81592e1ab3f6ddee2e75882b40a83fbb38ca38a9..d83f3caf9f1f67d14a7250b6f7834e4039e20017 100644
+--- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+@@ -155,8 +155,26 @@ public final class TickRegionScheduler {
+     // Tessera start - region loans for plugins in compatibility mode
+     private static final long TESSERA_BORROWED_RETRY_NS = TimeUnit.MILLISECONDS.toNanos(1L);
+ 
++    // while set, this thread enables plugins on startup and counts as the global tick thread; no region ticks until then
++    private static volatile Thread tesseraStartupThread;
++    private static ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> tesseraStartupRegion;
++    private static RegionizedWorldData tesseraStartupWorldData;
++
++    static Thread tesseraGetStartupThread() {
++        return tesseraStartupThread;
++    }
++
++    static void tesseraSetStartupThread(final Thread thread) {
++        tesseraStartupThread = thread;
++    }
++
+     // unlike setTickingRegion, switches between regions without unsetting; only for the global tick thread
+     static void tesseraSetTickingRegion(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
++        if (Thread.currentThread() == tesseraStartupThread) {
++            tesseraStartupRegion = region;
++            tesseraStartupWorldData = region == null ? null : region.regioniser.world.worldRegionData.get();
++            return;
++        }
+         final TickThreadRunner tickThreadRunner = (TickThreadRunner)Thread.currentThread();
+         tickThreadRunner.currentTickingRegion = region;
+         tickThreadRunner.currentTickingWorldRegionizedData = region == null ? null : region.regioniser.world.worldRegionData.get();
+@@ -184,7 +202,7 @@ public final class TickRegionScheduler {
+     public static ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> getCurrentRegion() {
+         final Thread currThread = Thread.currentThread();
+         if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
+-            return RegionShutdownThread.getRegion();
++            return currThread == tesseraStartupThread ? tesseraStartupRegion : RegionShutdownThread.getRegion(); // Tessera - region loans for plugins in compatibility mode
+         }
+         return tickThreadRunner.currentTickingRegion;
+     }
+@@ -197,7 +215,7 @@ public final class TickRegionScheduler {
+     public static RegionizedWorldData getCurrentRegionizedWorldData() {
+         final Thread currThread = Thread.currentThread();
+         if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
+-            return RegionShutdownThread.getWorldData();
++            return currThread == tesseraStartupThread ? tesseraStartupWorldData : RegionShutdownThread.getWorldData(); // Tessera - region loans for plugins in compatibility mode
+         }
+         return tickThreadRunner.currentTickingWorldRegionizedData;
+     }
+@@ -209,7 +227,7 @@ public final class TickRegionScheduler {
+     public static SchedulableTick getCurrentTickingTask() {
+         final Thread currThread = Thread.currentThread();
+         if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
+-            return null;
++            return currThread == tesseraStartupThread ? RegionizedServer.getGlobalTickData() : null; // Tessera - region loans for plugins in compatibility mode
+         }
+         return tickThreadRunner.currentTickingTask;
+     }

@@ -74,6 +74,8 @@ World unloading (T-001) already works in a similar way: the global thread acquir
 - Sync `Entity#teleport` (T-103c) is not instant: it returns `true` and runs via `teleportAsync` in the
   entity's next tick. `getLocation()` right after it returns the old position, and the plugin cannot see a
   `PlayerTeleportEvent` cancellation from the result.
+- `onEnable` on startup (T-108) borrows regions on the startup thread, which counts as the global tick until the
+  server starts. A sync chunk load there delays startup; `load: STARTUP` plugins run before worlds exist.
 - Plugin event handlers run on region threads. Loans from there are impossible: two regions could wait for each
   other. Another region is still inaccessible from an event handler.
 
