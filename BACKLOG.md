@@ -45,23 +45,17 @@
 
 ## P0 — в первую очередь
 
-### T-003 Метрики и профилирование регионов (spark) — [#299](https://github.com/PaperMC/Folia/issues/299), [#398](https://github.com/PaperMC/Folia/issues/398), [#31](https://github.com/PaperMC/Folia/issues/31)
-- **Зачем.** Без профайлера на проде не понять, какой регион тормозит. У Folia есть свой `/profiler` (патч Region-profiler), но
-  нет API и экспорта.
-- **Где.** `TickRegionScheduler`, `TickRegions.TickRegionData` (там уже есть статистика тиков), `RegionizedServer`, патч
-  «Add TPS From Region».
-- **Готово, когда.**
-  - В API (`folia-api`) есть `Bukkit.getRegionTickReport(World, chunkX, chunkZ)` или аналог: MSPT/TPS региона, число
-    чанков, сущностей и игроков в регионе.
-  - Есть список всех регионов мира со сводкой.
-  - Есть JMX MBean `dev.tessera:type=Region` с теми же числами (для Prometheus через jmx_exporter).
-  - Проверено, что spark (последняя версия с поддержкой Folia) запускается и снимает профиль. Если не запускается —
-    записать почему и что нужно.
-- **Проверка.** Тестовый плагин печатает отчёт. `jconsole` / `jcmd` показывает MBean.
-- **Образец.** Canvas (CraftCanvasMC/Canvas, GPL-3.0): region API `WorldRegionizer` / `ChunkRegion` / `RegionTickData`
-  (MSPT/TPS/utilization по окнам, список регионов, чанки региона), сущностей/игроков и MBean у них нет. Их профиль одного
-  региона в spark держится на закреплении региона за потоком своего планировщика — на EDF-планировщике Folia так нельзя.
-  Без закрепления можно взять адаптер spark под Folia (TickStatistics и WorldInfo по регионам).
+### T-037 spark на Tessera
+- **Зачем.** После T-003 видно, какой регион тормозит (`/tps`, `getRegionReport`, JMX), но нет профиля — что внутри региона ест время.
+- **Что проверено** (сборка main@73c05f6, spark 1.10.194, CI build 546). `spark-bukkit` не помечен `folia-supported` и не грузится. С
+  принудительным `folia-supported: true` падает в `onEnable`: `UnsupportedOperationException` в `BukkitSparkPlugin.executeAsync`
+  (Bukkit scheduler). Встроенный в Paper spark (`spark-paper`) в Folia выключен жёстко: `if (false) // Folia - disable in-built spark
+  profiler` в Region-Threading-Base, опция `spark.enabled` ни на что не влияет.
+- **Что нужно.** Включить встроенный spark с адаптерами под регионы: tick hook/reporter только с потоков регионов, TickStatistics из
+  `TickRegionScheduler`, WorldInfo по регионам, async-задачи через свой executor. Образец — `FoliaSparkPlugin` в Canvas (GPL-3.0,
+  ~1 000 строк без закрепления региона за потоком). Профиль одного региона на EDF-планировщике Folia недоступен: spark профилирует
+  потоки, а регион ходит по потокам — получится профиль всех потоков регионов.
+- **Готово, когда.** `/spark profiler start` и `/spark tps` работают на Tessera без ошибок, профиль загружается на spark.lucko.me.
 
 ---
 
@@ -298,3 +292,4 @@
 | `PlayerTeleportEvent` / `EntityTeleportEvent` и события порталов для асинхронных телепортов, T-002 | #490, #330 | 0026 / api 0005 |
 | Потокобезопасный скорборд: личные доски, команды, `/team`, `/scoreboard`, T-004 | #25 | 0027 / paper 0011 |
 | Результат `PlayerBucketEmptyEvent` у каждого потока свой, T-027 | — | 0028 |
+| Отчёт о регионах (`getRegionReport`, `getRegionReports`) и JMX `dev.tessera:type=Region`, T-003 | #299, #398 | 0029 / paper 0012 / api 0006 |

@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 08:30:40 +0300
+Subject: [PATCH] Add region report API
+
+Implement Server#getRegionReport and Server#getRegionReports on top of the region tick data.
+
+Fixes PaperMC/Folia#299
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index c5ceaa7dabc5d52fcc00d16866ab8b802a4b83f5..eb7aa1508659fed99954fc02900b2561d96add6f 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -3096,4 +3096,27 @@ public final class CraftServer implements Server {
+         }
+     }
+     // Folia end - region TPS API
++
++    // Tessera start - region report API
++    @Override
++    public io.papermc.paper.threadedregions.RegionReport getRegionReport(World world, int chunkX, int chunkZ) {
++        Preconditions.checkArgument(world != null, "World cannot be null");
++
++        return io.papermc.paper.threadedregions.RegionReports.report(((CraftWorld) world).getHandle(), chunkX, chunkZ);
++    }
++
++    @Override
++    public io.papermc.paper.threadedregions.RegionReport getRegionReport(Location location) {
++        Preconditions.checkArgument(location != null, "Location cannot be null");
++
++        return this.getRegionReport(location.getWorld(), location.getBlockX() >> 4, location.getBlockZ() >> 4);
++    }
++
++    @Override
++    public List<io.papermc.paper.threadedregions.RegionReport> getRegionReports(World world) {
++        Preconditions.checkArgument(world != null, "World cannot be null");
++
++        return java.util.Collections.unmodifiableList(io.papermc.paper.threadedregions.RegionReports.reports(((CraftWorld) world).getHandle()));
++    }
++    // Tessera end - region report API
+ }

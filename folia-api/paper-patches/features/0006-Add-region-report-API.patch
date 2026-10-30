@@ -1,0 +1,185 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 08:30:39 +0300
+Subject: [PATCH] Add region report API
+
+Plugins could only read the TPS of a region. Server owners need to see
+which region is slow and why, so expose a snapshot of a region with
+TPS, MSPT and utilisation for each window and the chunk, entity and
+player counts, for one region or for all regions of a world. Reports
+can be requested from any thread.
+
+Fixes PaperMC/Folia#299
+Fixes PaperMC/Folia#398
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/RegionReport.java b/src/main/java/io/papermc/paper/threadedregions/RegionReport.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..75a0a72953876eb85367bccebab5a0b5186c0c87
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/threadedregions/RegionReport.java
+@@ -0,0 +1,79 @@
++package io.papermc.paper.threadedregions;
++
++import org.bukkit.World;
++import org.jetbrains.annotations.NotNull;
++
++/**
++ * A snapshot of the tick statistics of one region, taken when the report was requested.
++ * <p>
++ * Reports can be requested from any thread. Counts of chunks, entities and players are updated by the region
++ * at the end of each of its ticks, tick times are averaged over the given {@link Window}.
++ */
++public interface RegionReport {
++
++    /**
++     * Time window over which tick statistics are averaged.
++     */
++    enum Window {
++        SECONDS_5,
++        SECONDS_15,
++        MINUTES_1,
++        MINUTES_5,
++        MINUTES_15
++    }
++
++    /**
++     * @return the world the region belongs to
++     */
++    @NotNull World getWorld();
++
++    /**
++     * Gets the id of the region. Ids are unique within a world and change when regions merge or split.
++     *
++     * @return the region id
++     */
++    long getId();
++
++    /**
++     * @return x coordinate of the chunk in the middle of the region
++     */
++    int getCenterChunkX();
++
++    /**
++     * @return z coordinate of the chunk in the middle of the region
++     */
++    int getCenterChunkZ();
++
++    /**
++     * @return number of chunks owned by the region
++     */
++    int getChunkCount();
++
++    /**
++     * @return number of entities in the region, including players
++     */
++    int getEntityCount();
++
++    /**
++     * @return number of players in the region
++     */
++    int getPlayerCount();
++
++    /**
++     * @param window the time window
++     * @return average ticks per second of the region, 20 if the region has not ticked in the window
++     */
++    double getTPS(@NotNull Window window);
++
++    /**
++     * @param window the time window
++     * @return average milliseconds per tick of the region
++     */
++    double getMSPT(@NotNull Window window);
++
++    /**
++     * @param window the time window
++     * @return share of time the region spent ticking, from 0 to 1
++     */
++    double getUtilisation(@NotNull Window window);
++}
+diff --git a/src/main/java/org/bukkit/Bukkit.java b/src/main/java/org/bukkit/Bukkit.java
+index e8104fec9acc0eb6f8b029d5b57a4a68f38634a0..dcc8e7a4d62cc2db5d4ccebff46641674f817b06 100644
+--- a/src/main/java/org/bukkit/Bukkit.java
++++ b/src/main/java/org/bukkit/Bukkit.java
+@@ -3074,6 +3074,41 @@ public final class Bukkit {
+         return server.getRegionTPS(world, chunkX, chunkZ);
+     }
+     // Folia end - region TPS API
++    // Tessera start - region report API
++    /**
++     * Gets a report for the region which owns the specified chunk, or {@code null} if no region owns it.
++     * Can be called from any thread.
++     *
++     * @param world World containing the chunk
++     * @param chunkX X-coordinate of the chunk
++     * @param chunkZ Z-coordinate of the chunk
++     * @return the region report, or null if the region doesn't exist
++     */
++    public static io.papermc.paper.threadedregions.@Nullable RegionReport getRegionReport(@NotNull World world, int chunkX, int chunkZ) {
++        return server.getRegionReport(world, chunkX, chunkZ);
++    }
++
++    /**
++     * Gets a report for the region which owns the specified location, or {@code null} if no region owns it.
++     * Can be called from any thread.
++     *
++     * @param location The location
++     * @return the region report, or null if the region doesn't exist
++     */
++    public static io.papermc.paper.threadedregions.@Nullable RegionReport getRegionReport(@NotNull Location location) {
++        return server.getRegionReport(location);
++    }
++
++    /**
++     * Gets reports for all regions of a world. Can be called from any thread.
++     *
++     * @param world The world
++     * @return reports of all regions in the world
++     */
++    public static @NotNull List<io.papermc.paper.threadedregions.RegionReport> getRegionReports(@NotNull World world) {
++        return server.getRegionReports(world);
++    }
++    // Tessera end - region report API
+ 
+     /**
+      * @deprecated All methods on this class have been deprecated, see the individual methods for replacements.
+diff --git a/src/main/java/org/bukkit/Server.java b/src/main/java/org/bukkit/Server.java
+index e8ffeb8ea740007579dd1f086acb2a090863555e..457f2cea7a8edcaf6405ff59654ac2c909bf8ddc 100644
+--- a/src/main/java/org/bukkit/Server.java
++++ b/src/main/java/org/bukkit/Server.java
+@@ -2844,5 +2844,35 @@ public interface Server extends PluginMessageRecipient, net.kyori.adventure.audi
+      * @return TPS (5s, 15s, 1m, 5m, 15m), or null if the region doesn't exist
+      */
+     double @Nullable [] getRegionTPS(@NotNull World world, int chunkX, int chunkZ);
++
++    // Tessera start - region report API
++    /**
++     * Gets a report for the region which owns the specified chunk, or {@code null} if no region owns it.
++     * Can be called from any thread.
++     *
++     * @param world World containing the chunk
++     * @param chunkX X-coordinate of the chunk
++     * @param chunkZ Z-coordinate of the chunk
++     * @return the region report, or null if the region doesn't exist
++     */
++    io.papermc.paper.threadedregions.@Nullable RegionReport getRegionReport(@NotNull World world, int chunkX, int chunkZ);
++
++    /**
++     * Gets a report for the region which owns the specified location, or {@code null} if no region owns it.
++     * Can be called from any thread.
++     *
++     * @param location The location
++     * @return the region report, or null if the region doesn't exist
++     */
++    io.papermc.paper.threadedregions.@Nullable RegionReport getRegionReport(@NotNull Location location);
++
++    /**
++     * Gets reports for all regions of a world. Can be called from any thread.
++     *
++     * @param world The world
++     * @return reports of all regions in the world
++     */
++    @NotNull List<io.papermc.paper.threadedregions.RegionReport> getRegionReports(@NotNull World world);
++    // Tessera end - region report API
+     // Folia end - region TPS API
+ }

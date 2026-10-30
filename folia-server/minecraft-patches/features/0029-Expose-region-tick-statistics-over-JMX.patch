@@ -1,0 +1,432 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 08:30:41 +0300
+Subject: [PATCH] Expose region tick statistics over JMX
+
+Without a way to export region statistics it is hard to find the slow
+region on a live server. Register one dev.tessera:type=Region MXBean
+per region with TPS, MSPT and utilisation for each window and the
+chunk, entity and player counts, and a dev.tessera:type=Regions
+summary. A daemon thread registers and unregisters the region beans
+every five seconds as regions are created, merged and split, so
+Prometheus can scrape them through jmx_exporter. Can be turned off
+with -Dtessera.regionMBeans=false.
+
+Also builds the snapshots returned by the region report API.
+
+Fixes PaperMC/Folia#299
+Fixes PaperMC/Folia#398
+
+diff --git a/io/papermc/paper/threadedregions/RegionMBeans.java b/io/papermc/paper/threadedregions/RegionMBeans.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..d746a9264b2807399e193578451e3c6c6eb95528
+--- /dev/null
++++ b/io/papermc/paper/threadedregions/RegionMBeans.java
+@@ -0,0 +1,238 @@
++package io.papermc.paper.threadedregions;
++
++import ca.spottedleaf.common.time.TickData;
++import com.mojang.logging.LogUtils;
++import io.papermc.paper.threadedregions.RegionReport.Window;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.world.level.ChunkPos;
++import org.slf4j.Logger;
++import java.lang.management.ManagementFactory;
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++import java.util.concurrent.Executors;
++import java.util.concurrent.ScheduledExecutorService;
++import java.util.concurrent.TimeUnit;
++import javax.management.MBeanServer;
++import javax.management.ObjectName;
++
++// Tessera start - region JMX
++/**
++ * Exposes region tick statistics over JMX: one {@code dev.tessera:type=Region,world=...,id=...} bean per region and a
++ * {@code dev.tessera:type=Regions} summary. Region beans are registered and unregistered by a daemon thread every
++ * few seconds, as regions are created, merged and split. Disable with {@code -Dtessera.regionMBeans=false}.
++ */
++public final class RegionMBeans {
++
++    private static final Logger LOGGER = LogUtils.getClassLogger();
++    private static final String DOMAIN = "dev.tessera";
++    private static final long SYNC_INTERVAL_SECONDS = 5L;
++
++    private static final Map<ObjectName, ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> REGISTERED = new HashMap<>();
++    private static boolean started;
++
++    private RegionMBeans() {}
++
++    public static synchronized void start() {
++        if (started || !Boolean.parseBoolean(System.getProperty("tessera.regionMBeans", "true"))) {
++            return;
++        }
++        started = true;
++        try {
++            ManagementFactory.getPlatformMBeanServer().registerMBean(new Regions(), new ObjectName(DOMAIN, "type", "Regions"));
++        } catch (final Exception ex) {
++            LOGGER.error("Failed to register region summary MBean", ex);
++            return;
++        }
++
++        final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform()
++            .name("Tessera Region MBean Sync")
++            .daemon(true)
++            .factory());
++        executor.scheduleWithFixedDelay(() -> {
++            try {
++                sync();
++            } catch (final Throwable thr) {
++                LOGGER.error("Failed to update region MBeans", thr);
++            }
++        }, SYNC_INTERVAL_SECONDS, SYNC_INTERVAL_SECONDS, TimeUnit.SECONDS);
++    }
++
++    private static List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> allRegions() {
++        final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions = new ArrayList<>();
++        final MinecraftServer server = MinecraftServer.getServer();
++        if (server == null) {
++            return regions;
++        }
++        for (final ServerLevel world : server.getAllLevels()) {
++            world.regioniser.computeForAllRegions(regions::add);
++        }
++        return regions;
++    }
++
++    private static synchronized void sync() throws Exception {
++        final MBeanServer mbeans = ManagementFactory.getPlatformMBeanServer();
++        final Set<ObjectName> alive = new HashSet<>();
++
++        for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : allRegions()) {
++            final ObjectName name = new ObjectName(DOMAIN + ":type=Region,world="
++                + ObjectName.quote(region.regioniser.world.getWorld().getName()) + ",id=" + region.id);
++            alive.add(name);
++            if (!REGISTERED.containsKey(name)) {
++                mbeans.registerMBean(new Region(region), name);
++                REGISTERED.put(name, region);
++            }
++        }
++
++        for (final var iterator = REGISTERED.keySet().iterator(); iterator.hasNext();) {
++            final ObjectName name = iterator.next();
++            if (!alive.contains(name)) {
++                iterator.remove();
++                if (mbeans.isRegistered(name)) {
++                    mbeans.unregisterMBean(name);
++                }
++            }
++        }
++    }
++
++    public interface RegionMXBean {
++        String getWorld();
++        long getId();
++        int getCenterChunkX();
++        int getCenterChunkZ();
++        int getChunkCount();
++        int getEntityCount();
++        int getPlayerCount();
++        double getTps5s();
++        double getTps15s();
++        double getTps1m();
++        double getTps5m();
++        double getTps15m();
++        double getMspt5s();
++        double getMspt15s();
++        double getMspt1m();
++        double getMspt5m();
++        double getMspt15m();
++        double getUtilisation5s();
++        double getUtilisation15s();
++        double getUtilisation1m();
++        double getUtilisation5m();
++        double getUtilisation15m();
++    }
++
++    public interface RegionsMXBean {
++        int getRegionCount();
++        int getChunkCount();
++        int getEntityCount();
++        int getPlayerCount();
++        int getTickThreadCount();
++        double getLowestTps15s();
++        double getHighestMspt15s();
++        double getTotalUtilisation15s();
++        double getGlobalTickTps15s();
++        double getGlobalTickMspt15s();
++    }
++
++    private static final class Region implements RegionMXBean {
++
++        private final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region;
++
++        private Region(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
++            this.region = region;
++        }
++
++        private TickData.TickReportData report(final Window window) {
++            return RegionReports.getTickReport(this.region.getData().getRegionSchedulingHandle(), window, System.nanoTime());
++        }
++
++        private ChunkPos center() {
++            final ChunkPos center = this.region.getCenterChunk();
++            return center == null ? new ChunkPos(0, 0) : center;
++        }
++
++        @Override public String getWorld() { return this.region.regioniser.world.getWorld().getName(); }
++        @Override public long getId() { return this.region.id; }
++        @Override public int getCenterChunkX() { return this.center().x(); }
++        @Override public int getCenterChunkZ() { return this.center().z(); }
++        @Override public int getChunkCount() { return this.region.getData().getRegionStats().getChunkCount(); }
++        @Override public int getEntityCount() { return this.region.getData().getRegionStats().getEntityCount(); }
++        @Override public int getPlayerCount() { return this.region.getData().getRegionStats().getPlayerCount(); }
++        @Override public double getTps5s() { return RegionReports.tps(this.report(Window.SECONDS_5)); }
++        @Override public double getTps15s() { return RegionReports.tps(this.report(Window.SECONDS_15)); }
++        @Override public double getTps1m() { return RegionReports.tps(this.report(Window.MINUTES_1)); }
++        @Override public double getTps5m() { return RegionReports.tps(this.report(Window.MINUTES_5)); }
++        @Override public double getTps15m() { return RegionReports.tps(this.report(Window.MINUTES_15)); }
++        @Override public double getMspt5s() { return RegionReports.mspt(this.report(Window.SECONDS_5)); }
++        @Override public double getMspt15s() { return RegionReports.mspt(this.report(Window.SECONDS_15)); }
++        @Override public double getMspt1m() { return RegionReports.mspt(this.report(Window.MINUTES_1)); }
++        @Override public double getMspt5m() { return RegionReports.mspt(this.report(Window.MINUTES_5)); }
++        @Override public double getMspt15m() { return RegionReports.mspt(this.report(Window.MINUTES_15)); }
++        @Override public double getUtilisation5s() { return RegionReports.utilisation(this.report(Window.SECONDS_5)); }
++        @Override public double getUtilisation15s() { return RegionReports.utilisation(this.report(Window.SECONDS_15)); }
++        @Override public double getUtilisation1m() { return RegionReports.utilisation(this.report(Window.MINUTES_1)); }
++        @Override public double getUtilisation5m() { return RegionReports.utilisation(this.report(Window.MINUTES_5)); }
++        @Override public double getUtilisation15m() { return RegionReports.utilisation(this.report(Window.MINUTES_15)); }
++    }
++
++    private static final class Regions implements RegionsMXBean {
++
++        private static int sum(final java.util.function.ToIntFunction<TickRegions.RegionStats> getter) {
++            int ret = 0;
++            for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : allRegions()) {
++                ret += getter.applyAsInt(region.getData().getRegionStats());
++            }
++            return ret;
++        }
++
++        private static List<TickData.TickReportData> reports15s() {
++            final long currTime = System.nanoTime();
++            final List<TickData.TickReportData> ret = new ArrayList<>();
++            for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : allRegions()) {
++                ret.add(region.getData().getRegionSchedulingHandle().getTickReport15s(currTime));
++            }
++            return ret;
++        }
++
++        @Override public int getRegionCount() { return allRegions().size(); }
++        @Override public int getChunkCount() { return sum(TickRegions.RegionStats::getChunkCount); }
++        @Override public int getEntityCount() { return sum(TickRegions.RegionStats::getEntityCount); }
++        @Override public int getPlayerCount() { return sum(TickRegions.RegionStats::getPlayerCount); }
++        @Override public int getTickThreadCount() { return TickRegions.getScheduler().getTotalThreadCount(); }
++
++        @Override
++        public double getLowestTps15s() {
++            double ret = 20.0;
++            for (final TickData.TickReportData report : reports15s()) {
++                ret = Math.min(ret, RegionReports.tps(report));
++            }
++            return ret;
++        }
++
++        @Override
++        public double getHighestMspt15s() {
++            double ret = 0.0;
++            for (final TickData.TickReportData report : reports15s()) {
++                ret = Math.max(ret, RegionReports.mspt(report));
++            }
++            return ret;
++        }
++
++        // same as the utilisation in /tps: all regions plus the global tick, 1.0 is one fully busy thread
++        @Override
++        public double getTotalUtilisation15s() {
++            double ret = RegionReports.utilisation(RegionizedServer.getGlobalTickData().getTickReport15s(System.nanoTime()));
++            for (final TickData.TickReportData report : reports15s()) {
++                ret += RegionReports.utilisation(report);
++            }
++            return ret;
++        }
++
++        @Override public double getGlobalTickTps15s() { return RegionReports.tps(RegionizedServer.getGlobalTickData().getTickReport15s(System.nanoTime())); }
++        @Override public double getGlobalTickMspt15s() { return RegionReports.mspt(RegionizedServer.getGlobalTickData().getTickReport15s(System.nanoTime())); }
++    }
++}
++// Tessera end - region JMX
+diff --git a/io/papermc/paper/threadedregions/RegionReports.java b/io/papermc/paper/threadedregions/RegionReports.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..dcee29b38ab94d516fb7ff0104a6cee7e3da4a17
+--- /dev/null
++++ b/io/papermc/paper/threadedregions/RegionReports.java
+@@ -0,0 +1,151 @@
++package io.papermc.paper.threadedregions;
++
++import ca.spottedleaf.common.time.TickData;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.world.level.ChunkPos;
++import org.bukkit.World;
++import java.util.ArrayList;
++import java.util.List;
++
++// Tessera - region report API and JMX
++public final class RegionReports {
++
++    private RegionReports() {}
++
++    public static TickData.TickReportData getTickReport(final TickRegionScheduler.RegionScheduleHandle handle,
++                                                        final io.papermc.paper.threadedregions.RegionReport.Window window,
++                                                        final long currTime) {
++        return switch (window) {
++            case SECONDS_5 -> handle.getTickReport5s(currTime);
++            case SECONDS_15 -> handle.getTickReport15s(currTime);
++            case MINUTES_1 -> handle.getTickReport1m(currTime);
++            case MINUTES_5 -> handle.getTickReport5m(currTime);
++            case MINUTES_15 -> handle.getTickReport15m(currTime);
++        };
++    }
++
++    // same defaults as /tps for a region without data in the window
++    public static double tps(final TickData.TickReportData report) {
++        return report == null ? 20.0 : report.tpsData().segmentAll().average();
++    }
++
++    public static double mspt(final TickData.TickReportData report) {
++        return report == null ? 0.0 : report.timePerTickData().segmentAll().average() / 1.0E6;
++    }
++
++    public static double utilisation(final TickData.TickReportData report) {
++        return report == null ? 0.0 : report.utilisation();
++    }
++
++    public static io.papermc.paper.threadedregions.RegionReport report(final ServerLevel world, final int chunkX, final int chunkZ) {
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
++            world.regioniser.getRegionAtSynchronised(chunkX, chunkZ);
++        return region == null ? null : snapshot(region);
++    }
++
++    public static List<io.papermc.paper.threadedregions.RegionReport> reports(final ServerLevel world) {
++        final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions =
++            new ArrayList<>();
++        world.regioniser.computeForAllRegions(regions::add);
++
++        final List<io.papermc.paper.threadedregions.RegionReport> ret = new ArrayList<>(regions.size());
++        for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
++            final io.papermc.paper.threadedregions.RegionReport report = snapshot(region);
++            if (report != null) {
++                ret.add(report);
++            }
++        }
++        return ret;
++    }
++
++    // null if the region died before the snapshot was taken
++    public static io.papermc.paper.threadedregions.RegionReport snapshot(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
++        final ChunkPos center = region.getCenterChunk();
++        if (center == null) {
++            return null;
++        }
++
++        final TickRegions.TickRegionData data = region.getData();
++        final TickRegions.RegionStats stats = data.getRegionStats();
++        final TickRegionScheduler.RegionScheduleHandle handle = data.getRegionSchedulingHandle();
++        final io.papermc.paper.threadedregions.RegionReport.Window[] windows = io.papermc.paper.threadedregions.RegionReport.Window.values();
++        final double[] tps = new double[windows.length];
++        final double[] mspt = new double[windows.length];
++        final double[] utilisation = new double[windows.length];
++        final long currTime = System.nanoTime();
++        for (final io.papermc.paper.threadedregions.RegionReport.Window window : windows) {
++            final TickData.TickReportData report = getTickReport(handle, window, currTime);
++            tps[window.ordinal()] = tps(report);
++            mspt[window.ordinal()] = mspt(report);
++            utilisation[window.ordinal()] = utilisation(report);
++        }
++
++        return new Snapshot(
++            region.regioniser.world.getWorld(), region.id, center.x(), center.z(),
++            stats.getChunkCount(), stats.getEntityCount(), stats.getPlayerCount(), tps, mspt, utilisation
++        );
++    }
++
++    private record Snapshot(World world, long id, int centerChunkX, int centerChunkZ, int chunkCount, int entityCount,
++                            int playerCount, double[] tps, double[] mspt, double[] utilisation)
++        implements io.papermc.paper.threadedregions.RegionReport {
++
++        @Override
++        public World getWorld() {
++            return this.world;
++        }
++
++        @Override
++        public long getId() {
++            return this.id;
++        }
++
++        @Override
++        public int getCenterChunkX() {
++            return this.centerChunkX;
++        }
++
++        @Override
++        public int getCenterChunkZ() {
++            return this.centerChunkZ;
++        }
++
++        @Override
++        public int getChunkCount() {
++            return this.chunkCount;
++        }
++
++        @Override
++        public int getEntityCount() {
++            return this.entityCount;
++        }
++
++        @Override
++        public int getPlayerCount() {
++            return this.playerCount;
++        }
++
++        @Override
++        public double getTPS(final Window window) {
++            return this.tps[window.ordinal()];
++        }
++
++        @Override
++        public double getMSPT(final Window window) {
++            return this.mspt[window.ordinal()];
++        }
++
++        @Override
++        public double getUtilisation(final Window window) {
++            return this.utilisation[window.ordinal()];
++        }
++
++        @Override
++        public String toString() {
++            return "RegionReport{world=" + this.world.getName() + ", id=" + this.id + ", center=[" + this.centerChunkX + ","
++                + this.centerChunkZ + "], chunks=" + this.chunkCount + ", entities=" + this.entityCount + ", players="
++                + this.playerCount + ", tps15s=" + this.tps[Window.SECONDS_15.ordinal()] + ", mspt15s="
++                + this.mspt[Window.SECONDS_15.ordinal()] + "}";
++        }
++    }
++}
+diff --git a/io/papermc/paper/threadedregions/TickRegions.java b/io/papermc/paper/threadedregions/TickRegions.java
+index a6ab9cb01f4f49f5f44b6ed324fa6d51139aabb6..bce53f9c03dd81391e5964e46d55f094803efa3e 100644
+--- a/io/papermc/paper/threadedregions/TickRegions.java
++++ b/io/papermc/paper/threadedregions/TickRegions.java
+@@ -81,6 +81,7 @@ public final class TickRegions implements ThreadedRegionizer.RegionCallbacks<Tic
+         started = true;
+         scheduler.setThreads(getTickThreads(GlobalConfiguration.get().threadedRegions));
+         scheduler.start();
++        RegionMBeans.start(); // Tessera - region JMX
+      }
+ 
+     @Override
