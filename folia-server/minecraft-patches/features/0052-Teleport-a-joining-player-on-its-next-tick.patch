@@ -1,0 +1,23 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Fri, 30 Oct 2026 11:45:59 +0300
+Subject: [PATCH] Teleport a joining player on its next tick
+
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 29fe368b26a8fceb9af594ff5644086840a9a8fa..3bff89a972eff41471a156a3eb0c0b7f850b65e3 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4679,6 +4679,12 @@ public abstract class Entity
+         ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, "Cannot teleport entity async");
+ 
+         if (destination.tesseraUnloading) return false; // Tessera - world loading API
++        // Tessera start - teleport a joining player on its next tick
++        // Not in the chunk loader and the tracker until PlayerJoinEvent is over: removing it from the world breaks the region (T-067)
++        if (this instanceof net.minecraft.server.level.ServerPlayer player && player.suppressTrackerForLogin) {
++            return false;
++        }
++        // Tessera end - teleport a joining player on its next tick
+ 
+         if (!ServerLevel.isInSpawnableBounds(new BlockPos(ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockX(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockY(pos), ca.spottedleaf.moonrise.common.util.CoordinateUtils.getBlockZ(pos)))) {
+             return false;
