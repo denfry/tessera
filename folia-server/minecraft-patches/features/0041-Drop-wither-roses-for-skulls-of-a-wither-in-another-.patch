@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 10:31:13 +0300
+Subject: [PATCH] Drop wither roses for skulls of a wither in another region
+
+A wither skull that went through a portal or into another region
+cannot reach its owner from its own thread, so the hit is unowned and
+the wither never gets the kill credit: no wither rose. Remember the
+hit on the victim when the skull's owner is a live wither, and drop the
+rose when the victim dies without a killer within the same 100 ticks
+the kill credit lasts in vanilla. The mark is set before the hit, as
+the hit itself may kill, and reverted when no damage was dealt.
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 6d2ee6d43ec53304711feed6dbef3f4b3aa3101a..6923d5cd25c9cca197a758cf233d302885da08c6 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -267,6 +267,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     public boolean effectsDirty = true;
+     public @Nullable EntityReference<LivingEntity> lastHurtByMob;
+     private int lastHurtByMobTimestamp;
++    public int tesseraWitherSkullHitTimestamp = Integer.MIN_VALUE; // Tessera - wither rose for skulls of a wither in another region
+     private @Nullable LivingEntity lastHurtMob;
+     private int lastHurtMobTimestamp;
+     private float speed;
+@@ -1917,7 +1918,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     protected void createWitherRose(final @Nullable LivingEntity killer) {
+         if (this.level() instanceof ServerLevel serverLevel) {
+             boolean var6 = false;
+-            if (killer instanceof WitherBoss) {
++            // Tessera start - wither rose for skulls of a wither in another region
++            // A skull whose wither is in another world or region cannot reach its owner, so the hit is unowned and
++            // the wither never gets the kill credit. The victim remembers the hit for as long as the credit would last.
++            boolean witherKill = killer instanceof WitherBoss
++                || (killer == null && this.tesseraWitherSkullHitTimestamp != Integer.MIN_VALUE && this.tickCount - this.tesseraWitherSkullHitTimestamp <= 100);
++            if (witherKill) {
++            // Tessera end - wither rose for skulls of a wither in another region
+                 if (serverLevel.getGameRules().get(GameRules.MOB_GRIEFING)) {
+                     BlockPos pos = this.blockPosition();
+                     BlockState state = Blocks.WITHER_ROSE.defaultBlockState();
+diff --git a/net/minecraft/world/entity/projectile/hurtingprojectile/WitherSkull.java b/net/minecraft/world/entity/projectile/hurtingprojectile/WitherSkull.java
+index 2ca5fefa798af814e7e3d59def71df921b2afd54..c9a21f6b44f102668420a7e06ea9f8b00533bf7c 100644
+--- a/net/minecraft/world/entity/projectile/hurtingprojectile/WitherSkull.java
++++ b/net/minecraft/world/entity/projectile/hurtingprojectile/WitherSkull.java
+@@ -72,7 +72,16 @@ public class WitherSkull extends AbstractHurtingProjectile {
+                     }
+                 }
+             } else {
++                // Tessera start - wither rose for skulls of a wither in another region - mark before the hit, it may kill
++                LivingEntity witherVictim = var8 instanceof LivingEntity victim
++                    && this.getOwnerRaw() instanceof net.minecraft.world.entity.boss.wither.WitherBoss wither && !wither.isRemoved() ? victim : null;
++                int previousWitherHit = witherVictim == null ? 0 : witherVictim.tesseraWitherSkullHitTimestamp;
++                if (witherVictim != null) {
++                    witherVictim.tesseraWitherSkullHitTimestamp = witherVictim.tickCount;
++                }
++                // Tessera end - wither rose for skulls of a wither in another region
+                 wasHurt = var8.hurtServer(serverLevel, this.damageSources().magic().eventEntityDamager(this), 5.0F); // Paper - Fire EntityDamageByEntityEvent for unowned wither skulls // Paper - fix DamageSource API
++                if (witherVictim != null && !wasHurt) witherVictim.tesseraWitherSkullHitTimestamp = previousWitherHit; // Tessera - wither rose for skulls of a wither in another region
+             }
+ 
+             if (wasHurt && var8 instanceof LivingEntity livingEntity) {
