@@ -6,10 +6,8 @@
 
 **A Folia fork with fixes and performance work for large survival servers.**
 
-English | [Русский](README.ru.md)
-
 [![Build](https://img.shields.io/github/actions/workflow/status/denfry/tessera/release.yml?branch=main&label=build)](https://github.com/denfry/tessera/actions/workflows/release.yml)
-[![Release](https://img.shields.io/github/v/release/denfry/tessera?include_prereleases&sort=semver)](https://github.com/denfry/tessera/releases)
+[![Release](https://img.shields.io/github/v/release/denfry/tessera?sort=semver)](https://github.com/denfry/tessera/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](PATCHES-LICENSE)
 [![Java 25](https://img.shields.io/badge/Java-25-orange)](https://adoptium.net/)
 [![Minecraft 26.3](https://img.shields.io/badge/Minecraft-26.3-62b47a)](https://minecraft.net/)
@@ -24,7 +22,8 @@ Tessera is a fork of [Folia](https://github.com/PaperMC/Folia) (regionised multi
 large survival servers.
 
 > [!NOTE]
-> Early stage, still in testing; not production-ready yet. What is planned next is in [BACKLOG.md](BACKLOG.md).
+> The first stable build is [26.3-build.9](https://github.com/denfry/tessera/releases/tag/26.3-build.9). It has been
+> tested with bots and test plugins, not yet on a large live server. What is planned next is in [BACKLOG.md](BACKLOG.md).
 
 ## Highlights
 
@@ -33,7 +32,11 @@ large survival servers.
 - **Teleport events** — `PlayerTeleportEvent`, `EntityTeleportEvent` and portal events fire for async
   teleports, portals and ender pearls.
 - **Worlds on the fly** — `Bukkit.createWorld` and `unloadWorld` work while the server is running.
-- **Fixes** — ender pearls and stasis chambers, MiniHUD debug subscriptions, dragons away from 0,0,
+- **Plugins without Folia support** — compatibility mode runs Bukkit plugins without `folia-supported`
+  (see [Plugins](#plugins)); `/tessera compat` shows what they do that Folia does not allow.
+- **Monitoring** — region report API and JMX beans (`dev.tessera:type=Region`), bundled spark adapted to regions,
+  a watchdog that names the lock a hung region waits for and the thread holding it.
+- **Fixes** — respawn events, `teleportAsync` from `PlayerJoinEvent`, the locator bar, `/dialog`, ender pearls and stasis chambers, MiniHUD debug subscriptions, dragons away from 0,0,
   villagers in portals, region ownership in mob AI, autosave of maps and new players, network hardening.
 
 The full list, with upstream issues, is in [PATCHES.md](PATCHES.md).
@@ -65,14 +68,15 @@ are paused until it finishes (see [COMPAT.md](COMPAT.md)). Plugins marked as Fol
 
 ## Download
 
-Builds are published on the [Releases](https://github.com/denfry/tessera/releases) page. Every push
-to `main` is also built by the [Release workflow](https://github.com/denfry/tessera/actions/workflows/release.yml);
-the paperclip jar is attached to each run as an artifact.
+Builds are published on the [Releases](https://github.com/denfry/tessera/releases) page as
+`tessera-<minecraft>-<build>.jar` with a `.sha256` file. The latest stable build is marked "Latest"; every push to
+`main` is built by the [Release workflow](https://github.com/denfry/tessera/actions/workflows/release.yml) and
+published as a pre-release.
 
 Run it like any Paper server jar (Java 25 required):
 
 ```bash
-java -Xms4G -Xmx4G -jar server.jar --nogui   # server.jar = the downloaded *-paperclip-*.jar
+java -Xms4G -Xmx4G -jar server.jar --nogui   # server.jar = the downloaded tessera-*.jar
 ```
 
 The console log style is set with `-Dtessera.log.style=<style>` or the `TESSERA_LOG_STYLE` environment variable:

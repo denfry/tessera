@@ -65,7 +65,7 @@ not because its page says it supports Folia.
 
 ## Adding a plugin
 
-Check it on a test server (see "Проверка" in [BACKLOG.md](BACKLOG.md)): start it, use its main commands and features,
+Check it on a test server (see "Testing" in [BACKLOG.md](BACKLOG.md)): start it, use its main commands and features,
 join with players in different regions if the plugin touches players or the world, and read the log. Then add or update
 its row. When a Tessera release fixes a problem, re-check the plugin and update the row.
 

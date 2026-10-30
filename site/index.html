@@ -7,7 +7,6 @@
 <meta name="description" content="Tessera is a Folia fork with bug fixes and performance work for large survival Minecraft servers: thread-safe scoreboards, teleport events, world loading, dupe and crash fixes.">
 <link rel="canonical" href="https://denfry.github.io/tessera/">
 <link rel="alternate" hreflang="en" href="https://denfry.github.io/tessera/">
-<link rel="alternate" hreflang="ru" href="https://denfry.github.io/tessera/ru/">
 <link rel="alternate" hreflang="x-default" href="https://denfry.github.io/tessera/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Tessera">
@@ -52,7 +51,6 @@
     <a class="opt" href="#run">run</a>
     <a class="opt" href="#build">build</a>
     <a href="https://github.com/denfry/tessera">github</a>
-    <a href="ru/" hreflang="ru" lang="ru">ru</a>
   </nav>
 </header>
 
@@ -94,6 +92,9 @@
     <li><h3>Region ownership</h3><p>Mob AI no longer touches entities and blocks owned by another region.</p><a href="https://github.com/PaperMC/Folia/pull/523">#523</a></li>
     <li><h3>Saving</h3><p>Maps and players that were never saved are autosaved again.</p><a href="https://github.com/PaperMC/Folia/issues/505">#505</a></li>
     <li><h3>Network hardening</h3><p>Protocol switches don't park tick threads on netty; repeated configuration packets are ignored.</p><a href="https://github.com/PaperMC/Folia/issues/520">#520</a></li>
+    <li><h3>Plugins without Folia support</h3><p>Compatibility mode runs Bukkit plugins without <code>folia-supported</code>: their scheduler tasks and commands borrow the regions they touch, sync teleports and chunk loads work. <code>/tessera compat</code> shows what they do that Folia does not allow.</p><a href="https://github.com/denfry/tessera/blob/main/COMPAT.md">COMPAT.md</a></li>
+    <li><h3>Monitoring</h3><p>Region report API and JMX beans per region, bundled spark adapted to regions, a watchdog that names the lock a hung region waits for and the thread holding it.</p><a href="https://github.com/PaperMC/Folia/issues/299">#299</a></li>
+    <li><h3>Respawn and teleports</h3><p><code>PlayerRespawnEvent</code> fires again, <code>teleportAsync</code> works from <code>PlayerJoinEvent</code> and keeps relative velocity, respawn points in other regions no longer fail.</p><a href="https://github.com/PaperMC/Folia/issues/337">#337</a></li>
   </ul>
   <p class="more"><a href="https://github.com/denfry/tessera/blob/main/PATCHES.md">All patches →</a></p>
 </section>
@@ -123,8 +124,8 @@
 
 <section id="run" aria-labelledby="run-h">
   <h2 id="run-h">Run</h2>
-  <p>Grab the <code>*-paperclip-*.jar</code> from <a href="https://github.com/denfry/tessera/releases">Releases</a>
-    or from the latest <a href="https://github.com/denfry/tessera/actions/workflows/release.yml">Release workflow</a> run. Java 25 is required.</p>
+  <p>Grab <code>tessera-26.3-&lt;build&gt;.jar</code> (with its <code>.sha256</code>) from <a href="https://github.com/denfry/tessera/releases">Releases</a>:
+    the build marked "Latest" is the stable one, every push to <code>main</code> is published as a pre-release. Java 25 is required.</p>
 <pre>java -Xms4G -Xmx4G -jar server.jar --nogui</pre>
   <p>By default only plugins that declare <code>folia-supported: true</code> are loaded; others can be listed under
     <code>compat.plugins</code> in <code>config/tessera.yml</code> to run in compatibility mode, with their

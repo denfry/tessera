@@ -1,345 +1,345 @@
 # Tessera backlog
 
-Список багов и фич для Tessera. Каждый пункт можно целиком отдать исполнителю: там есть контекст, где искать, что
-считать готовым и как проверить. Сделанное переносится в раздел «Готово» и в [PATCHES.md](PATCHES.md).
+Bugs and features for Tessera. Each item can be handed to an implementer as is: it has context, where to look, what
+counts as done and how to check. Finished items move to the "Done" section and to [PATCHES.md](PATCHES.md).
 
-Приоритеты: **P0** нужно в первую очередь (без этого не обойтись большому серверу), **P1** заметно игрокам или роняет сервер, **P2** производительность
-и удобство, **P3** когда-нибудь.
-
----
-
-## Как брать задачу (прочитать исполнителю целиком)
-
-1. **Где код.** Сначала `./gradlew applyAllPatches`. Исходники Minecraft с патчами Folia лежат в
-   `folia-server/src/minecraft/java` (отдельный git-репозиторий), исходники Paper-сервера — в `paper-server`, API — в
-   `paper-api`. Правки коммитятся **внутри этих репозиториев**, по одному коммиту на изменение. Затем `./rb.sh`
-   пересобирает `.patch` файлы в `folia-server/minecraft-patches/features`, `folia-server/paper-patches/features` и
-   `folia-api/paper-patches`. Номера патчей paperweight проставляет сам.
-2. **Поиск по коду.** Сначала `codebase-index search "<запрос>" --compact` / `refs` / `impact` из корня репозитория, Grep — запасной вариант.
-3. **Стиль.**
-   - Изменённые строки помечаются `// Tessera - <зачем>`, блоки — `// Tessera start - ...` / `// Tessera end - ...`.
-   - Править как можно меньше строк upstream.
-   - Поведение, меняющее геймплей, прячется за опцию конфига, по умолчанию — ванильное.
-   - В рабочем дереве CRLF: если `git apply` не накладывается, правь скриптом с учётом `\r\n`.
-4. **Коммиты.**
-   - Автор строго `git -c user.name=denfry -c user.email=dabinayo@pm.me commit`.
-   - Сообщение во вложенных репозиториях — по-английски, в стиле Paper: заголовок, абзац «почему», затем `Fixes PaperMC/Folia#N` и,
-     если код взят из чужого PR, `Based on PaperMC/Folia#N (автор)`.
-   - В репозитории tessera — по-русски: `fix: ...`, `feat: ...`.
-   - Никакой AI-атрибуции (Co-Authored-By, «Generated with», упоминаний Claude/AI) — нигде.
-   - Не пушить без явного разрешения.
-5. **Проверка.**
-   - Собрать: `./gradlew :folia-server:compileJava`, затем `./gradlew createPaperclipJar`; jar — `folia-server/build/libs/folia-paperclip-*.jar`.
-   - Запустить тестовый сервер на **JDK 25** (`~/.jdks/azul-25/bin/java`) в отдельной папке. В `server.properties`: `online-mode=false`,
-     `white-list=false`, свой порт.
-   - Для входа игроков есть `tools/joinbot.py <порт> <ник> <секунд онлайн> [лишних finish_configuration]` — минимальный клиент
-     26.3 (протокол 777): логин, конфигурация, вход в игру, ответы на keep-alive.
-   - Если поведение проверяется плагином, написать маленький тестовый плагин (`folia-supported: true`) и собрать его
-     `javac` против jar из `<сервер>/libraries`.
-   - В логе не должно быть новых `ERROR` / `Exception`.
-6. **После.** Строка в PATCHES.md, пункт здесь перенести в «Готово».
-7. **Плагины.** Каждый сторонний плагин, запущенный на Tessera, записывается в [PLUGINS.md](PLUGINS.md) (статус, версия,
-   сборка Tessera, что сломано). Только публичные плагины.
+Priorities: **P0** first (a large server cannot do without it), **P1** visible to players or crashes the server, **P2** performance
+and convenience, **P3** someday.
 
 ---
 
-## P0 — в первую очередь
+## How to take a task (read it in full before starting)
+
+1. **Where the code is.** First run `./gradlew applyAllPatches`. Minecraft sources with Folia patches are in
+   `folia-server/src/minecraft/java` (a separate git repository), Paper server sources are in `paper-server`, the API is in
+   `paper-api`. Changes are committed **inside these repositories**, one commit per change. Then `./rb.sh`
+   rebuilds the `.patch` files in `folia-server/minecraft-patches/features`, `folia-server/paper-patches/features` and
+   `folia-api/paper-patches`. paperweight assigns patch numbers itself.
+2. **Code search.** First `codebase-index search "<query>" --compact` / `refs` / `impact` from the repository root, Grep is the fallback.
+3. **Style.**
+   - Changed lines are marked `// Tessera - <why>`, blocks `// Tessera start - ...` / `// Tessera end - ...`.
+   - Touch as few upstream lines as possible.
+   - Behaviour that changes gameplay goes behind a config option, vanilla by default.
+   - The working tree uses CRLF: if `git apply` does not apply, edit with a script that accounts for `\r\n`.
+4. **Commits.**
+   - Author strictly `git -c user.name=denfry -c user.email=dabinayo@pm.me commit`.
+   - Messages in the nested repositories are in English, Paper style: title, a "why" paragraph, then `Fixes PaperMC/Folia#N` and,
+     if the code comes from someone else's PR, `Based on PaperMC/Folia#N (author)`.
+   - In the tessera repository, in Russian: `fix: ...`, `feat: ...`.
+   - No AI attribution (Co-Authored-By, "Generated with", mentions of Claude/AI) anywhere.
+   - Do not push without explicit permission.
+5. **Testing.**
+   - Build: `./gradlew :folia-server:compileJava`, then `./gradlew createPaperclipJar`; the jar is `folia-server/build/libs/folia-paperclip-*.jar`.
+   - Run a test server on **JDK 25** (`~/.jdks/azul-25/bin/java`) in a separate folder. In `server.properties`: `online-mode=false`,
+     `white-list=false`, a unique port.
+   - For player joins there is `tools/joinbot.py <port> <name> <seconds online> [extra finish_configuration]`, a minimal
+     26.3 client (protocol 777): login, configuration, joining the game, keep-alive replies.
+   - If behaviour is checked through a plugin, write a small test plugin (`folia-supported: true`) and build it with
+     `javac` against the jar from `<server>/libraries`.
+   - The log must have no new `ERROR` / `Exception`.
+6. **After.** A line in PATCHES.md, move the item here to "Done".
+7. **Plugins.** Every third-party plugin run on Tessera is recorded in [PLUGINS.md](PLUGINS.md) (status, version,
+   Tessera build, what is broken). Public plugins only.
 
 ---
 
-## P1 — заметно игрокам
-
-### T-019 Повреждение нарисованных карт — [#177](https://github.com/PaperMC/Folia/issues/177)
-- **Зачем.** Задевает ImageFrame на main.
-- **Где.** `MapItemSavedData` (общие данные карт с сервера после #505), `HoldingPlayer`, `MapItem#update`. Карту
-  обновляют несколько регионов одновременно, `colors[]` и `dirty` не синхронизированы.
-- **Готово, когда.** Карта, висящая в рамках в разных регионах и в руках игроков, не портится. Доступ к `MapItemSavedData`
-  потокобезопасен или выполняется на одном владельце.
-- **Проверено (2026-10-30).** Гипотеза про несинхронизированные `colors[]`/`dirty` устарела: весь доступ к
-  `MapItemSavedData`, `HoldingPlayer`, `CraftMapView` под `synchronized`; `MapIndex` атомарный, `dirty` volatile; карты
-  пишутся только с глобального тика (0015), записи идут цепочкой. Причина по коду не найдена. Свежая зацепка из issue
-  (1.21.4): locked-карта портится, если телепортироваться, не кликнув по ней в инвентаре. Нужен настоящий клиент:
-  cartography table → lock → телепорт в другой регион/мир → смотреть карту и файл `data/map_N.dat`.
-  Ещё проверить: `ServerLevel#getMapData` зовёт `MapInitializeEvent` внутри `ConcurrentHashMap.computeIfAbsent` —
-  плагин, который в обработчике трогает другую карту (ImageFrame), может получить `Recursive update`.
-
-### T-025 Жители неправильно определяют рабочее место — [#127](https://github.com/PaperMC/Folia/issues/127)
-- **Где.** `AssignProfessionFromJobSite`, `AcquirePoi`, `PoiManager` (смежно с уже сделанными патчами по AI и POI).
+## P0 — first
 
 ---
 
-## P1 — краши и зависания
-- **Проверено (2026-10-30).** Не воспроизводится: закрытая комната, 8 безработных жителей и 8 кафедр, игрок рядом
-  (без игрока AI жителей почти не тикает из-за activation range — так и на Paper). Tessera и Paper 26.3 (build 231) ведут
-  себя одинаково: все кафедры заняты за ~8 с, за 4 мин ни одного `LOSING_JOB`. Не проверено: смена дня и ночи, выгрузка и
-  загрузка чанков фермы, жители у границы региона, многочасовой прогон. Если всплывёт снова — нужен мир с фермой.
+## P1 — visible to players
 
-### T-030 Чужой регион трогают сущности и AI
+### T-019 Corruption of drawn maps — [#177](https://github.com/PaperMC/Folia/issues/177)
+- **Why.** Affects ImageFrame on main.
+- **Where.** `MapItemSavedData` (map data shared with the server after #505), `HoldingPlayer`, `MapItem#update`. The map
+  is updated by several regions at once, `colors[]` and `dirty` are not synchronized.
+- **Done when.** A map hanging in frames in different regions and held by players does not get corrupted. Access to `MapItemSavedData`
+  is thread-safe or happens on a single owner.
+- **Checked (2026-10-30).** The hypothesis about unsynchronized `colors[]`/`dirty` is outdated: all access to
+  `MapItemSavedData`, `HoldingPlayer`, `CraftMapView` is under `synchronized`; `MapIndex` is atomic, `dirty` is volatile; maps
+  are written only from the global tick (0015), writes are chained. No cause found in the code. Fresh lead from the issue
+  (1.21.4): a locked map gets corrupted if you teleport without clicking it in the inventory. Needs a real client:
+  cartography table → lock → teleport to another region/world → look at the map and the `data/map_N.dat` file.
+  Also check: `ServerLevel#getMapData` calls `MapInitializeEvent` inside `ConcurrentHashMap.computeIfAbsent` —
+  a plugin that touches another map in the handler (ImageFrame) may get `Recursive update`.
+
+### T-025 Villagers detect their workstation incorrectly — [#127](https://github.com/PaperMC/Folia/issues/127)
+- **Where.** `AssignProfessionFromJobSite`, `AcquirePoi`, `PoiManager` (adjacent to the already done AI and POI patches).
+
+---
+
+## P1 — crashes and hangs
+- **Checked (2026-10-30).** Not reproducible: closed room, 8 unemployed villagers and 8 lecterns, player nearby
+  (without a player villager AI barely ticks due to activation range — same on Paper). Tessera and Paper 26.3 (build 231) behave
+  the same: all lecterns taken in ~8 s, not a single `LOSING_JOB` in 4 min. Not checked: day/night cycle, unloading and
+  loading the farm chunks, villagers at a region border, a multi-hour run. If it comes up again, a world with the farm is needed.
+
+### T-030 Entities and AI touch a foreign region
 - Issues: [#386](https://github.com/PaperMC/Folia/issues/386) (Zombie), [#381](https://github.com/PaperMC/Folia/issues/381)
-  (getEntities async), [#334](https://github.com/PaperMC/Folia/issues/334) (свиная башня), [#203](https://github.com/PaperMC/Folia/issues/203)
-  (AI читает блок вне региона), [#199](https://github.com/PaperMC/Folia/issues/199) (сущность движется за пределы региона),
+  (getEntities async), [#334](https://github.com/PaperMC/Folia/issues/334) (pig tower), [#203](https://github.com/PaperMC/Folia/issues/203)
+  (AI reads a block outside the region), [#199](https://github.com/PaperMC/Folia/issues/199) (entity moves outside the region),
   [#152](https://github.com/PaperMC/Folia/issues/152) (owner state async), [#327](https://github.com/PaperMC/Folia/issues/327)
-  (удаление игрока).
-- **Как делать.** По стектрейсу в issue найти поведение, сенсор или метод. Добавить проверку
-  `TickThread.isTickThreadFor(...)` и пропустить или отложить действие — по образцу уже сделанного патча
-  «Validate region ownership in AI behaviours». Каждый случай — отдельный коммит.
-- **Готово, когда.** Для каждого стектрейса есть патч или запись «не воспроизводится на 26.3».
-- **Образцы из Canvas.**
-  - #386: `Mob#setTarget` не принимает цель из чужого региона; подкрепление зомби не грузит чанки
+  (player removal).
+- **How.** From the stack trace in the issue find the behaviour, sensor or method. Add a
+  `TickThread.isTickThreadFor(...)` check and skip or defer the action, following the already done patch
+  "Validate region ownership in AI behaviours". Each case is a separate commit.
+- **Done when.** Each stack trace has a patch or a "not reproducible on 26.3" note.
+- **References from Canvas.**
+  - #386: `Mob#setTarget` does not accept a target from a foreign region; zombie reinforcements do not load chunks
     (`getChunkIfLoadedImmediately`).
-  - #199: в `Entity#move` при смещении в чужой регион бросается своё исключение, `Level#guardEntityTick` ловит его и
-    делает `teleportAsync` в точку назначения вместо краша (подход Luminol). Самодостаточно.
-  - #203: точечные проверки в `TamableAnimal`, `Creaking`, `AllayAi`, `DragonFireball`, `startSleeping` (кровать в чужом
-    регионе), случайный телепорт хоруса и эндермена (`randomTeleport` проверяет владение целевой областью).
+  - #199: in `Entity#move`, moving into a foreign region throws a custom exception, `Level#guardEntityTick` catches it and
+    does `teleportAsync` to the destination instead of crashing (Luminol's approach). Self-contained.
+  - #203: point checks in `TamableAnimal`, `Creaking`, `AllayAi`, `DragonFireball`, `startSleeping` (bed in a foreign
+    region), chorus and enderman random teleport (`randomTeleport` checks ownership of the target area).
 
-### T-031 Жители принудительно грузят чанки ради POI — [#292](https://github.com/PaperMC/Folia/issues/292)
-- **Где.** `PoiManager#ensureLoadedAndValid`, `AcquirePoi`, `YieldJobSite`, `SetClosestHomeAsWalkTarget`. Поиск POI грузит
-  чанки синхронно.
-- **Готово, когда.** Поиск POI не грузит чанки вне региона и не держит регион. В профиле нет `ensureLoadedAndValid` в
-  горячих местах.
-- **Образец.** Canvas: `AcquirePoi.create(...)` получил `scanRange` и `shouldLoad`, опция загрузки чанков (по умолчанию —
-  ваниль) и меньшие радиусы поиска jobsite/home/meeting; `SetClosestHomeAsWalkTarget` переведён на `PoiAccess` Paper.
+### T-031 Villagers force-load chunks for POI — [#292](https://github.com/PaperMC/Folia/issues/292)
+- **Where.** `PoiManager#ensureLoadedAndValid`, `AcquirePoi`, `YieldJobSite`, `SetClosestHomeAsWalkTarget`. POI search loads
+  chunks synchronously.
+- **Done when.** POI search does not load chunks outside the region and does not hold the region. No `ensureLoadedAndValid` in
+  hot spots in the profile.
+- **Reference.** Canvas: `AcquirePoi.create(...)` got `scanRange` and `shouldLoad`, a chunk loading option (vanilla by
+  default) and smaller jobsite/home/meeting search radii; `SetClosestHomeAsWalkTarget` switched to Paper's `PoiAccess`.
 
-### T-032 Конкуренция за блокировки — [#291](https://github.com/PaperMC/Folia/issues/291)
-- Снять профиль конкуренции (JFR `jdk.JavaMonitorEnter`, `jdk.ThreadPark`) при 50+ ботах в разных регионах, найти
-  горячие мониторы (как было с POI в #530) и убрать общие блокировки.
+### T-032 Lock contention — [#291](https://github.com/PaperMC/Folia/issues/291)
+- Take a contention profile (JFR `jdk.JavaMonitorEnter`, `jdk.ThreadPark`) with 50+ bots in different regions, find
+  hot monitors (as with POI in #530) and remove shared locks.
 
-### T-034 Зависания и самопроизвольная остановка — [#447](https://github.com/PaperMC/Folia/issues/447), [#437](https://github.com/PaperMC/Folia/issues/437), [#196](https://github.com/PaperMC/Folia/issues/196)
-- Логов в issue мало. Нужны watchdog-дампы с живых серверов на Tessera.
-- Watchdog улучшен (0053, в «Готово»). Осталось: собрать дампы зависаний с живых серверов и разобрать их.
+### T-034 Hangs and spontaneous shutdown — [#447](https://github.com/PaperMC/Folia/issues/447), [#437](https://github.com/PaperMC/Folia/issues/437), [#196](https://github.com/PaperMC/Folia/issues/196)
+- Few logs in the issues. Need watchdog dumps from live servers on Tessera.
+- Watchdog improved (0053, in "Done"). Remaining: collect hang dumps from live servers and analyze them.
 
-### T-035 Титры энда
-Остаток пункта про мелкие гонки (остальное в «Готово»).
-- **Не воспроизводится на 26.3.** «Герой деревни» после рейда: Folia уже выдаёт эффект на потоке героя («Fix off
-  region raid heroes»). Moonrise#130: индекс в `ParallelSearchRadiusIteration` не выходит за таблицу — дистанция
-  загрузки ограничена `MAX_VIEW_DISTANCE + 1` в сеттерах, таблица на `MAX_VIEW_DISTANCE + 3`.
-- **Что.** Сейчас Folia титры не показывает вообще (`seenCredits = true`, TODO в `endPortalLogicAsync`): игрок сразу
-  переносится в обычный мир. Вернуть титры: сначала респавн в обычном мире (`respawn(..., alive = true)`), потом
-  `WIN_GAME`, повторный `PERFORM_RESPAWN` после титров ничего не делает.
-- **Готово, когда.** Проверено настоящим клиентом: титры показываются один раз, после них игрок в обычном мире, не в
-  пустоте энда.
+### T-035 End credits
+Rest of the item about minor races (the rest is in "Done").
+- **Not reproducible on 26.3.** "Hero of the Village" after a raid: Folia already applies the effect on the hero's thread ("Fix off
+  region raid heroes"). Moonrise#130: the index in `ParallelSearchRadiusIteration` does not go past the table — load
+  distance is capped at `MAX_VIEW_DISTANCE + 1` in the setters, the table is sized for `MAX_VIEW_DISTANCE + 3`.
+- **What.** Folia currently does not show credits at all (`seenCredits = true`, TODO in `endPortalLogicAsync`): the player is
+  moved straight to the overworld. Bring credits back: first respawn in the overworld (`respawn(..., alive = true)`), then
+  `WIN_GAME`, a repeated `PERFORM_RESPAWN` after the credits does nothing.
+- **Done when.** Checked with a real client: credits are shown once, after them the player is in the overworld, not in
+  the End void.
 
 ---
 
-## P2 — производительность
+## P2 — performance
 
-### T-040 Лёгкий тик для `text_display`, `item_display`, `block_display`, неподвижных `armor_stand`
-- **Зачем.** На спавне main 391 такая сущность (голограммы, NPC), их тикают и отслеживают как обычных.
-- **Что.**
-  - Display-сущности без интерполяции и пассажиров не тикают физику.
-  - `ArmorStand` с `setMarker(true)` или без гравитации не проверяет коллизии.
-  - Трекер реже пересчитывает их видимость.
-  - Всё за опцией конфига.
-- **Проверка.** 2000 голограмм у бота, сравнить MSPT региона до и после.
+### T-040 Lightweight tick for `text_display`, `item_display`, `block_display`, stationary `armor_stand`
+- **Why.** The main spawn has 391 such entities (holograms, NPCs), they are ticked and tracked like regular ones.
+- **What.**
+  - Display entities without interpolation and passengers do not tick physics.
+  - `ArmorStand` with `setMarker(true)` or without gravity does not check collisions.
+  - The tracker recomputes their visibility less often.
+  - All behind a config option.
+- **Testing.** 2000 holograms near a bot, compare region MSPT before and after.
 
-### T-041 Асинхронный трекер сущностей
-- **Что.** Расчёт, кто кого видит (`ChunkMap.TrackedEntity#updatePlayer`), вынести в пул потоков с последующим
-  применением на потоке региона. Это ответ на кейс «все игроки в одном регионе» (сложность O(P·E)).
-- **Готово, когда.** При 100 ботах и 3000 сущностях в одном регионе MSPT трекера падает заметно, без рассинхрона клиентов.
+### T-041 Asynchronous entity tracker
+- **What.** Move the computation of who sees whom (`ChunkMap.TrackedEntity#updatePlayer`) to a thread pool, then
+  apply on the region thread. This addresses the "all players in one region" case (O(P·E) complexity).
+- **Done when.** With 100 bots and 3000 entities in one region, tracker MSPT drops noticeably, without client desync.
 
-### T-042 Асинхронный поиск пути
-- `PathNavigation` / `PathFinder` считать вне потока региона по снимку блоков, результат применять в тике.
+### T-042 Asynchronous pathfinding
+- Compute `PathNavigation` / `PathFinder` off the region thread from a block snapshot, apply the result in the tick.
 
-### T-043 DAB: реже тикать AI далёких мобов
-- Частота `Mob#serverAiStep` и `Brain#tick` зависит от расстояния до ближайшего игрока. Опция конфига, по умолчанию выключено.
+### T-043 DAB: tick AI of distant mobs less often
+- `Mob#serverAiStep` and `Brain#tick` frequency depends on distance to the nearest player. Config option, off by default.
 
-### T-044 Настройки размера региона
-- В конфиг Folia/Tessera вынести `grid-exponent` и радиус слияния регионов, задокументировать влияние.
+### T-044 Region size settings
+- Expose `grid-exponent` and the region merge radius in the Folia/Tessera config, document the impact.
 
-### T-045 Порталы, связанные между незером и обычным миром, на одном потоке — [#469](https://github.com/PaperMC/Folia/issues/469)
-- Опция: регионы обычного мира и незера, связанные порталом, тикаются одним потоком (фермы и механизмы у порталов). Дизайн
-  сначала обсудить.
+### T-045 Portals linking the nether and the overworld on one thread — [#469](https://github.com/PaperMC/Folia/issues/469)
+- Option: overworld and nether regions linked by a portal tick on one thread (farms and contraptions at portals). Discuss
+  the design first.
 
-### T-046 Сохранение игроков и чанков порциями без пиков
-- В профиле Leaf были пики раз в минуту. Проверить, что автосохранение на Tessera размазано по тикам: `max-per-tick` для игроков,
-  чанков и карт.
+### T-046 Saving players and chunks in batches without spikes
+- The Leaf profile had spikes once a minute. Check that autosave on Tessera is spread across ticks: `max-per-tick` for players,
+  chunks and maps.
 
-## P3 — потом
+## P3 — later
 
-- **T-054** Логи в JSON для Loki/ELK (отложено, пока нет Grafana/ELK): стиль `json` в `TesseraLogStyle` (одна строка JSON на событие
-  в stdout) и `-Dtessera.log.json-file=true` → `logs/latest.json` с ротацией как у `latest.log`. ECS через `log4j-layout-template-json`;
-  поля `@timestamp`, `log.level`, `log.logger`, `message` без `§`/ANSI, `process.thread.name`, `tessera.plugin`, context data из T-052
-  (`tessera.region.*`, `tessera.global`), `error.type` / `error.message` / `error.stack_trace`. Готово, когда `jq` и Promtail/Filebeat
-  разбирают логи без своих regex; описать в README.
-- **T-060** Автоматический мёрж upstream Folia ([#468](https://github.com/PaperMC/Folia/issues/468)): workflow раз в неделю
-  делает ветку `upstream-sync`, мёржит PaperMC/Folia, прогоняет `applyAllPatches` и сборку и открывает PR.
-- **T-061** Сообщения чанкового API ([#96](https://github.com/PaperMC/Folia/issues/96)): понятные ошибки при вызове
-  синхронного API не с того потока (какой поток, какой регион, что использовать вместо).
-- **T-062** Проверка версий для Tessera: `/version` сейчас пишет «Unknown version». Сделать проверку по GitHub Releases
+- **T-054** JSON logs for Loki/ELK (deferred until there is Grafana/ELK): a `json` style in `TesseraLogStyle` (one JSON line per event
+  to stdout) and `-Dtessera.log.json-file=true` → `logs/latest.json` with rotation like `latest.log`. ECS via `log4j-layout-template-json`;
+  fields `@timestamp`, `log.level`, `log.logger`, `message` without `§`/ANSI, `process.thread.name`, `tessera.plugin`, context data from T-052
+  (`tessera.region.*`, `tessera.global`), `error.type` / `error.message` / `error.stack_trace`. Done when `jq` and Promtail/Filebeat
+  parse the logs without custom regex; document in README.
+- **T-060** Automatic upstream Folia merge ([#468](https://github.com/PaperMC/Folia/issues/468)): a weekly workflow
+  creates an `upstream-sync` branch, merges PaperMC/Folia, runs `applyAllPatches` and the build, and opens a PR.
+- **T-061** Chunk API messages ([#96](https://github.com/PaperMC/Folia/issues/96)): clear errors when synchronous API
+  is called from the wrong thread (which thread, which region, what to use instead).
+- **T-062** Version check for Tessera: `/version` currently prints "Unknown version". Check against GitHub Releases of
   `denfry/tessera`.
-- **T-063** CI: прогон `tools/joinbot.py` на собранном jar в Actions (сервер, два бота, вход и выход, остановка без ERROR).
-- **T-065** Ранний `stop` из консоли: команда, введённая сразу после `Done`, падает с NPE `CommandSourceStack.getLevel()` is null
-  (`getGameRules()`), сервер не останавливается. Видно при `echo stop | java -jar ...`.
-- **T-066** Края событий телепорта (после T-002): для портала `PlayerTeleportEvent` получает примерный выход (портал ещё не найден);
-  при `canCreatePortal=false` и отсутствии портала сущность ставится в точку поиска, а не остаётся на месте, как в Paper; откат
-  после отменённого `PlayerMoveEvent` идёт через `teleportAsync` и сам вызывает `PlayerTeleportEvent`, его можно отменить.
-- **T-064** Края выгрузки миров (после T-001): сущность или игрок, чей асинхронный телепорт в мир начался до `unloadWorld`, и вход игрока, сохранённого в этом мире, в момент выгрузки. Сейчас `unloadWorld` проверяет только игроков в мире и запрещает новые `teleportAsync` туда. Пока мир сохраняется, глобальный поток ждёт (на тестах 0,1–1,4 с). Образец — Canvas `unloadWorldAsync`: счётчик входящих в мир игроков (учёт в `PrepareSpawnTask`, снятие при дисконнекте), выгрузка на отдельном потоке, телепортирующиеся в мир возвращаются в точку отправления.
+- **T-063** CI: run `tools/joinbot.py` against the built jar in Actions (server, two bots, join and leave, shutdown without ERROR).
+- **T-065** Early `stop` from the console: a command entered right after `Done` fails with NPE `CommandSourceStack.getLevel()` is null
+  (`getGameRules()`), the server does not stop. Visible with `echo stop | java -jar ...`.
+- **T-066** Teleport event edge cases (after T-002): for a portal, `PlayerTeleportEvent` gets an approximate exit (the portal is not found yet);
+  with `canCreatePortal=false` and no portal the entity is placed at the search point instead of staying in place as on Paper; the rollback
+  after a cancelled `PlayerMoveEvent` goes through `teleportAsync` and itself fires `PlayerTeleportEvent`, which can be cancelled.
+- **T-064** World unload edge cases (after T-001): an entity or player whose async teleport into the world started before `unloadWorld`, and a join of a player saved in that world during the unload. Currently `unloadWorld` checks only players in the world and forbids new `teleportAsync` into it. While the world is saving, the global thread waits (0.1–1.4 s in tests). Reference: Canvas `unloadWorldAsync`: a counter of players entering the world (counted in `PrepareSpawnTask`, released on disconnect), unloading on a separate thread, entities teleporting into the world are returned to their origin.
 
 ---
 
-## Направления — большие фичи
+## Directions — big features
 
-Пять направлений, которые выделяют Tessera среди форков Folia. Каждое разбито на задачи, которые можно брать по одной.
-Порядок: A, потом B (вырастает из T-003), D, E. C — исследование на месяцы, браться после A и B.
+Five directions that set Tessera apart from other Folia forks. Each is split into tasks that can be taken one at a time.
+Order: A, then B (grows out of T-003), D, E. C is months of research, start it after A and B.
 
-### A. Обычные Bukkit-плагины на Folia (T-100)
+### A. Regular Bukkit plugins on Folia (T-100)
 
-Сейчас плагин без `folia-supported: true` не загружается, а `Bukkit.getScheduler()` бросает
-`UnsupportedOperationException`. Цель — чтобы большинство простых плагинов работало без переписывания. Всё включается
-опцией и только для плагинов из списка. Плагины, написанные под API Folia, это никак не затрагивает.
+Currently a plugin without `folia-supported: true` does not load, and `Bukkit.getScheduler()` throws
+`UnsupportedOperationException`. The goal is for most simple plugins to work without rewriting. Everything is enabled
+by an option and only for listed plugins. Plugins written against the Folia API are not affected.
 
-#### T-101 Режим совместимости: загрузка плагинов без `folia-supported` — готово
-- **Где.** `SpigotPluginProviderFactory#build`, `PaperPluginProviderFactory#build`, `CraftMagicNumbers#checkSupported`.
-- **Что.** Опция конфига `compat.plugins` (список имён или `*`), по умолчанию пусто. Такой плагин загружается с
-  предупреждением в логе. Есть `TesseraCompat.isCompat(Plugin)`, на него опираются остальные задачи.
-- **Готово, когда.** Без опции поведение прежнее. С опцией EssentialsX загружается, в логе одно предупреждение о плагине.
+#### T-101 Compatibility mode: loading plugins without `folia-supported` — done
+- **Where.** `SpigotPluginProviderFactory#build`, `PaperPluginProviderFactory#build`, `CraftMagicNumbers#checkSupported`.
+- **What.** Config option `compat.plugins` (list of names or `*`), empty by default. Such a plugin loads with a
+  warning in the log. There is `TesseraCompat.isCompat(Plugin)`, the other tasks build on it.
+- **Done when.** Without the option, behaviour is unchanged. With the option EssentialsX loads, with one warning about the plugin in the log.
 
-#### T-102 `BukkitScheduler` поверх планировщиков Folia — готово
-- **Где.** `CraftScheduler` (`handle` бросает `UnsupportedOperationException`), `CraftServer#getScheduler`.
-- **Что.** Для плагинов в режиме совместимости синхронные задачи (`runTask*`, `scheduleSync*`, `callSyncMethod`,
-  `getMainThreadExecutor`, `BukkitRunnable`) идут в `GlobalRegionScheduler`, асинхронные — в `AsyncScheduler`.
-  Работают id задач, `cancelTask`, `cancelTasks`, `isQueued`, `isCurrentlyRunning`, `getPendingTasks`, отмена задач при выключении плагина.
-  Для остальных плагинов поведение Folia прежнее (исключение).
-- **Готово, когда.** Тестовый плагин без `folia-supported` с таймером, отложенной, асинхронной и отменённой задачей и
-  `callSyncMethod` работает. Задачи плагина снимаются в `onDisable`.
+#### T-102 `BukkitScheduler` on top of Folia schedulers — done
+- **Where.** `CraftScheduler` (`handle` throws `UnsupportedOperationException`), `CraftServer#getScheduler`.
+- **What.** For plugins in compatibility mode, sync tasks (`runTask*`, `scheduleSync*`, `callSyncMethod`,
+  `getMainThreadExecutor`, `BukkitRunnable`) go to `GlobalRegionScheduler`, async ones to `AsyncScheduler`.
+  Task ids, `cancelTask`, `cancelTasks`, `isQueued`, `isCurrentlyRunning`, `getPendingTasks` work, tasks are cancelled when the plugin is disabled.
+  For other plugins Folia behaviour is unchanged (exception).
+- **Done when.** A test plugin without `folia-supported` with a timer, delayed, async and cancelled task and
+  `callSyncMethod` works. Plugin tasks are removed in `onDisable`.
 
-#### T-103 Вызовы мира и сущностей не с того потока — готово (T-103a, T-103b, T-103c, T-103d, T-103e)
-- **Зачем.** Задача T-102 выполняется на глобальном потоке, а `Block#setType`, `Entity#teleport`, инвентари можно трогать только
-  на потоке региона. Без этого плагин падает на первом же изменении мира.
-- **Дизайн — [COMPAT.md](COMPAT.md)** (заём регионов). Ниже исходные идеи, от которых отказались:
-  - изменения без результата (`setType`, `setHealth`, `addPotionEffect`) — выполнить на владельце позже;
-  - синхронный `teleport` — через `teleportAsync`, вернуть `true`;
-  - чтения (`getType`, `getLocation`) — разрешить устаревшее чтение там, где это безопасно, иначе исключение с понятным текстом;
-  - ожидание глобального потока на регион запрещено (взаимная блокировка).
-- **Где.** Проверки `TickThread.ensureTickThread` в `CraftBlock`, `CraftEntity`, `CraftWorld`, `CraftInventory*`.
-- **Готово, когда.** Работают основные команды EssentialsX (`/tp`, `/home`, `/heal`, `/give`, `/spawn`).
-- **T-103e.** Команды brigadier плагина в режиме совместимости (Paper API или прямо в диспетчер, как у Skript)
-  выполняются так же, как команды Bukkit в T-103b. Готово.
-- **Осталось.** `skript reload all` перерегистрирует команды, пока пул Paper Async Command Builder обходит дерево
-  (`Commands#fillUsableCommands` → `CommandNode#hashCode`): `ConcurrentModificationException`, игрок получает старое
-  дерево команд. Регистрацию из режима совместимости синхронизировать со сборкой дерева или пересылать дерево после.
+#### T-103 World and entity calls from the wrong thread — done (T-103a, T-103b, T-103c, T-103d, T-103e)
+- **Why.** A T-102 task runs on the global thread, while `Block#setType`, `Entity#teleport`, inventories may only be touched
+  on the region thread. Without this a plugin fails on its first world change.
+- **Design: [COMPAT.md](COMPAT.md)** (region borrowing). Below are the original ideas that were dropped:
+  - changes without a result (`setType`, `setHealth`, `addPotionEffect`) — run on the owner later;
+  - synchronous `teleport` — via `teleportAsync`, return `true`;
+  - reads (`getType`, `getLocation`) — allow stale reads where safe, otherwise an exception with a clear message;
+  - the global thread waiting on a region is forbidden (deadlock).
+- **Where.** `TickThread.ensureTickThread` checks in `CraftBlock`, `CraftEntity`, `CraftWorld`, `CraftInventory*`.
+- **Done when.** The main EssentialsX commands work (`/tp`, `/home`, `/heal`, `/give`, `/spawn`).
+- **T-103e.** Brigadier commands of a compatibility-mode plugin (Paper API or straight into the dispatcher, like Skript)
+  run the same way as Bukkit commands in T-103b. Done.
+- **Remaining.** `skript reload all` re-registers commands while the Paper Async Command Builder pool walks the tree
+  (`Commands#fillUsableCommands` → `CommandNode#hashCode`): `ConcurrentModificationException`, the player gets the old
+  command tree. Synchronize registration from compatibility mode with tree building, or resend the tree afterwards.
 
-#### T-105 Межрегиональные операции
-- `openInventory` контейнера в чужом регионе, телепорт с пассажирами, `getNearbyEntities` на границе региона,
-  `World#getEntities` из задачи плагина (снимок по регионам).
+#### T-105 Cross-region operations
+- `openInventory` of a container in a foreign region, teleport with passengers, `getNearbyEntities` at a region border,
+  `World#getEntities` from a plugin task (per-region snapshot).
 
-#### T-106 Прогон на реальных плагинах
-- Плагины из PLUGINS.md со статусом «needs Folia build»: EssentialsX, LevelledMobs, InvSee++, FAWE и т.д. Для каждого
-  записать статус в режиме совместимости.
+#### T-106 Run against real plugins
+- Plugins from PLUGINS.md with status "needs Folia build": EssentialsX, LevelledMobs, InvSee++, FAWE, etc. For each,
+  record the status in compatibility mode.
 
-#### T-107 Поля и API Paper, которых нет в Folia
-- `MinecraftServer.currentTick` возвращено (тики глобального региона). Готово.
-- Задержка 0 у планировщиков Folia от плагина в режиме совместимости означает следующий тик, как в `BukkitScheduler`
-  (InvSee++ сам переходит на API Folia и передаёт 0). Готово.
-- Осталось: `MinecraftServer#execute` / `MCUtil.MAIN_EXECUTOR` (FAWE ставит через него тикеты), `Server#getTickTimes`
-  и `getAverageTickTime` вне потока региона (TabTPS показывает MSPT 0 и `Long.MAX_VALUE`).
+#### T-107 Paper fields and API missing in Folia
+- `MinecraftServer.currentTick` restored (global region ticks). Done.
+- Delay 0 in Folia schedulers from a compatibility-mode plugin means the next tick, as in `BukkitScheduler`
+  (InvSee++ switches to the Folia API itself and passes 0). Done.
+- Remaining: `MinecraftServer#execute` / `MCUtil.MAIN_EXECUTOR` (FAWE adds tickets through it), `Server#getTickTimes`
+  and `getAverageTickTime` off the region thread (TabTPS shows MSPT 0 and `Long.MAX_VALUE`).
 
-#### T-108 `onEnable` плагина в режиме совместимости трогает мир
-- Multiverse-Core при запуске читает блоки у точки появления и меняет настройки мира. `onEnable` выполняется на потоке
-  сервера до старта планировщика регионов: проверки падают, а синхронная загрузка чанка там зависла бы.
-- Варианты: включать плагины в режиме совместимости в первом глобальном тике (в области займа) и не пускать игроков до
-  этого; или разрешить потоку сервера до старта планировщика сам выполнять задачи чанков.
+#### T-108 Compatibility-mode plugin's `onEnable` touches the world
+- Multiverse-Core on startup reads blocks at the spawn point and changes world settings. `onEnable` runs on the
+  server thread before the region scheduler starts: checks fail, and a synchronous chunk load there would hang.
+- Options: enable compatibility-mode plugins in the first global tick (inside a borrow scope) and keep players out until
+  then; or allow the server thread to run chunk tasks itself before the scheduler starts.
 
-### B. Атрибуция лагов (T-110)
+### B. Lag attribution (T-110)
 
-Основа — T-003 (отчёт и MBean по регионам).
+Builds on T-003 (per-region report and MBean).
 
-- **T-111 Время плагинов по регионам.** Время обработчиков событий и задач планировщиков в разрезе «регион × плагин»
-  (обёртка над `EventExecutor` и задачами `Folia*Scheduler`). Накладные расходы — не больше пары процентов MSPT.
-- **T-112 Время по типам сущностей и блок-сущностей в регионе.** Сводка из уже существующего профайлера Folia без снятия полного профиля.
-- **T-113 `/tessera lag`.** Самые тяжёлые регионы, плагины и типы сущностей с координатами, по клику — телепорт.
-- **T-114 Экспорт.** Числа T-111 и T-112 в MBean T-003 (Prometheus через jmx_exporter).
-- **T-115 Детектор спайков.** Если тик региона дольше порога, автоматически пишется короткий профиль региона в файл.
+- **T-111 Plugin time per region.** Time of event handlers and scheduler tasks broken down by "region × plugin"
+  (wrapper around `EventExecutor` and `Folia*Scheduler` tasks). Overhead: no more than a couple percent of MSPT.
+- **T-112 Time per entity and block entity type in a region.** Summary from the existing Folia profiler without taking a full profile.
+- **T-113 `/tessera lag`.** Heaviest regions, plugins and entity types with coordinates, click to teleport.
+- **T-114 Export.** T-111 and T-112 numbers in the T-003 MBean (Prometheus via jmx_exporter).
+- **T-115 Spike detector.** If a region tick exceeds a threshold, a short region profile is written to a file automatically.
 
-### C. Горизонтальное масштабирование (T-120) — исследование
+### C. Horizontal scaling (T-120) — research
 
-Регионы Folia уже изолированы, следующий шаг — разносить их по процессам. Это месяцы работы, до прототипа только дизайн.
+Folia regions are already isolated, the next step is spreading them across processes. This is months of work, design only until a prototype.
 
-- **T-121 Дизайн-документ.** Разобрать MultiPaper: кто владеет регионом, передача владения, общее хранилище, перенос игрока
-  через прокси (transfer-пакет 1.20.5+), что делать с сущностями на границе.
-- **T-122 Прототип.** Два процесса, один мир, статическое разбиение по координатам, игрок переходит между узлами через Velocity.
-- **T-123 Глобальное состояние между узлами.** Время, погода, скорборд, список игроков, чат.
-- **T-124 Миграция регионов между узлами по нагрузке.**
+- **T-121 Design document.** Study MultiPaper: who owns a region, ownership handoff, shared storage, moving a player
+  through the proxy (transfer packet 1.20.5+), what to do with entities on the border.
+- **T-122 Prototype.** Two processes, one world, static split by coordinates, the player moves between nodes via Velocity.
+- **T-123 Global state across nodes.** Time, weather, scoreboard, player list, chat.
+- **T-124 Region migration between nodes by load.**
 
-### D. Хранилище мира (T-130)
+### D. World storage (T-130)
 
-- **T-131 Абстракция хранилища региона.** Интерфейс над чтением и записью файлов регионов в Moonrise, чтобы подключать другие форматы.
-- **T-132 Формат Linear.** Опция конфига и конвертер в обе стороны.
-- **T-133 Снапшоты.** Резервная копия мира на ходу, без остановки и без пика MSPT.
-- **T-134 Откат области из снапшота.** Онлайн, на потоке владельца региона: выгрузить чанки, заменить, загрузить.
+- **T-131 Region storage abstraction.** An interface over reading and writing region files in Moonrise, to plug in other formats.
+- **T-132 Linear format.** Config option and a converter both ways.
+- **T-133 Snapshots.** Live world backup, without stopping and without an MSPT spike.
+- **T-134 Area rollback from a snapshot.** Online, on the region owner thread: unload chunks, replace, load.
 
-### E. Запись событий (T-140)
+### E. Event recording (T-140)
 
-- **T-141 Журнал региона.** Кольцевой буфер входящих пакетов игроков, изменений блоков, спавна и удаления сущностей.
-  Сбрасывается в файл по команде или при падении региона.
-- **T-142 Трассировка предметов для поиска дюпов.** Появление, слияние, подбор предметов и переносы между контейнерами с
-  id стака. Практическая замена полного повтора.
-- **T-143 Детерминированный повтор — исследование.** Ваниль недетерминирована (RNG, порядок задач между потоками). Оценить,
-  что нужно: свои RNG на регион, запись всех входов. Только отчёт.
+- **T-141 Region journal.** Ring buffer of incoming player packets, block changes, entity spawns and removals.
+  Flushed to a file on command or when a region crashes.
+- **T-142 Item tracing for dupe hunting.** Item appearance, merging, pickup and transfers between containers with
+  stack id. A practical substitute for full replay.
+- **T-143 Deterministic replay — research.** Vanilla is nondeterministic (RNG, task order across threads). Estimate
+  what is needed: per-region RNG, recording all inputs. Report only.
 
 ---
 
-## Готово
+## Done
 
-| Что | Issue / PR | Патч |
+| What | Issue / PR | Patch |
 |---|---|---|
-| Эндер-жемчуг: смена измерения, стазис-камеры, damager | #421, #438 | 0012 |
-| Debug-подписки (MiniHUD) роняли сервер | #472, #432 | 0013 |
+| Ender pearl: dimension change, stasis chambers, damager | #421, #438 | 0012 |
+| Debug subscriptions (MiniHUD) crashed the server | #472, #432 | 0013 |
 | `spawnRadius 0` | #401 | 0014 |
-| Автосохранение карт | #505 | 0015 |
-| Проверки региона в AI | #523, #525, #526, #527, #495 | 0016 |
-| POI деревень без общей блокировки | #530 | 0017 |
-| Чат во время остановки | #461 | 0018 |
-| `playersByName` потокобезопасен | #497 | 0019 |
-| Автосохранение несохранённых игроков | #459 | 0020 |
-| Части эндер-дракона | #427, #504 | 0021 |
-| Жители в порталах («World mismatch») | #431 | 0022 |
-| Смена протокола не блокирует потоки, спам finish_configuration | #454, #520 | 0023 |
-| Уборка в мире из `onDisable` | #353 | 0024 / paper 0009 |
-| Потокобезопасные hide/showPlayer | #406 | paper 0007 |
-| Кэш типов целей мобов | #522 | paper 0008 |
-| Брендинг Tessera, GitHub Release на каждую сборку | — | build.gradle.kts.patch, release.yml |
-| Загрузка и выгрузка миров (`createWorld` / `unloadWorld`), T-001 | #134 | 0025 / paper 0010 |
-| `PlayerTeleportEvent` / `EntityTeleportEvent` и события порталов для асинхронных телепортов, T-002 | #490, #330 | 0026 / api 0005 |
-| Потокобезопасный скорборд: личные доски, команды, `/team`, `/scoreboard`, T-004 | #25 | 0027 / paper 0011 |
-| Результат `PlayerBucketEmptyEvent` у каждого потока свой, T-027 | — | 0028 |
-| Отчёт о регионах (`getRegionReport`, `getRegionReports`) и JMX `dev.tessera:type=Region`, T-003 | #299, #398 | 0029 / paper 0012 / api 0006 |
-| Встроенный spark под регионы: профиль потоков регионов, TPS самого медленного региона, T-037 | #299 | paper 0013 |
-| Выбор стиля логов в консоли (`pretty` / `classic`), T-050 | — | paper 0014 |
-| Цвета `pretty`: уровень, тег плагина, `NO_COLOR` / `FORCE_COLOR`, Pterodactyl, T-051 | — | paper 0015 |
-| Регион в строке лога `pretty` (`[world x,z]`, `[global]`, `[global > world x,z]` для взятого взаймы), T-052 | — | paper 0016 |
-| Короткие стектрейсы в `pretty`: свёртка reflection/netty/log4j/планировщика, кадры плагинов с именем jar, хвост ниже последнего кадра плагина → `... N more`, T-053 | — | paper 0017 |
-| При `max-players=N` заходят ровно N игроков (раньше N−1), T-036 | — | 0030 |
-| Боссбары и `/data storage` потокобезопасны (`ServerBossEvent`, `CustomBossEvents`, `CommandStorage`), T-035 | — | 0031, 0032 |
-| `LevelStorageSource.resources` — `ConcurrentHashMap`, T-035 | — | 0033 |
-| Якорь возрождения снова тратит заряд, списание на регионе якоря, T-035 | — | 0034 |
-| Карта сокровищ в структуре-цели больше не падает (`tryReference`), T-035 | — | 0035 |
-| Триггеры достижений мишени, лечения зомби-жителя и подбора брошенного предмета — на потоке игрока, T-035 | — | 0036 |
-| `getRespawnLocation()` с точкой в другом мире или регионе возвращает сохранённую точку вместо `World mismatch`. Сама `setRespawnLocation` на 26.3 не стирает точку: с `forced` она переживает смерть и перезаход, без `forced` и без кровати/якоря сбрасывается, как в Paper, T-011 | #337 | paper 0018 / api 0007 |
-| `PlayerRespawnEvent` / `PlayerPostRespawnEvent` снова вызываются (после смерти и при выходе из энда), на регионе точки возрождения. Игрок верхом выходит из энда на спавн мира, как в ванили; транспорт получает `EntityPortalEvent` (T-002), T-012 | #453 | 0037 |
-| Поплавок удочки удаляется, когда игрок ушёл в другой мир или регион (раньше оставался висеть навсегда); `player.fishing` очищается только на потоке игрока, удочка сразу закидывается снова, T-014 | #435 | 0038 |
-| `teleportAsync` с `TeleportFlag.Relative.VELOCITY_*` сохраняет скорость (с `VELOCITY_ROTATION` поворачивает её), как на Paper: в своём регионе, в чужом и в другом мире; игроку флаги уходят в пакет позиции. Без флагов скорость сбрасывается, как и на Paper, — это и есть способ её сбросить. Слушатель, сменивший точку в событии телепорта, сбрасывает скорость, T-015 | #441 | 0039 / paper 0019 |
-| Первый жемчуг в новый энд-гейтвей долетает до внешних островов: гейтвей в энде без выхода ищет его заранее, когда рядом игрок (32 блока), а жемчуг и другие сущности (не игроки), влетевшие до того, как выход найден, ждут внутри гейтвея. Игрок, вошедший в гейтвей до конца поиска, по-прежнему не телепортируется с первого раза, T-016 | #51 | 0040 |
-| Розы иссушения снова выпадают, если череп визера прошёл через портал или в другой регион: жертва запоминает попадание черепа визера и при смерти без убийцы в течение 100 тиков роняет розу. Визер в другом регионе за убийство не лечится, урон такого черепа остаётся 5, T-018 | #388 | 0041 |
-| Локатор-бар (`locator_bar`) снова работает: точки отслеживаются между регионами, каждый игрок раз в тик обновляет свои связи на своём потоке, как vanilla при движении; проверено ботами — track/update/untrack в своём и чужом регионе, выключение и включение правила, T-020 | #370 | 0049 |
-| BlockState из ItemMeta с координатами 0,0,0 — не воспроизводится на 26.3: состояние из `BlockStateMeta#getBlockState()` не привязано к миру (`isPlaced() == false`), инвентарь, `update()` и `setBlockState` работают, `open()`/`close()` бросают «must be placed», как на Paper; проверки потока на 0,0,0 нет (сундук, бочка, шалкер, печь, улей), T-023 | #328 | — |
-| Воронки не подбирают предметы — не воспроизводится, поведение как у Paper 26.3: подбор падающих предметов через границы чанков и регионов (1533/1536 против 1532/1536), цепочки воронок с компараторами совпадают до предмета, ферма из issue на 26.3 «протекает» одинаково и на Paper. Блокировка нижней воронки факелом в классическом сортировщике отдельно не проверялась, T-010 | #209 | — |
-| Нотные блоки не реагируют на редстоун и не меняют высоту — не баг Folia: так работает настройка Paper `block-updates.disable-noteblock-updates: true` (и `disable-tripwire-updates` для растяжек), её включают ItemsAdder/Oraxen/Nexo. С настройками по умолчанию на Tessera нотный блок от редстоуна звучит (NotePlayEvent) и даёт импульс наблюдателю так же, как на Paper 26.3; с настройкой — те же симптомы, что в issue, T-013 | #470 | — |
-| Режим совместимости: плагины без `folia-supported` и `BukkitScheduler`, T-101, T-102 | — | 0042 / paper 0020 |
-| Заём регионов: задачи плагинов в режиме совместимости меняют блоки и сущности, T-103a | — | 0043 / paper 0021 |
-| Команды плагинов в режиме совместимости выполняются на глобальном потоке с займом регионов, T-103b | — | paper 0022 |
-| Синхронный `teleport` у плагинов в режиме совместимости через `teleportAsync`, T-103c | — | paper 0023 |
-| Синхронная загрузка чанка у плагинов в режиме совместимости (PaperLib в EssentialsX), T-103d | — | 0044 |
-| Команды brigadier у плагинов в режиме совместимости (Skript), T-103e | — | 0045 / paper 0024 |
-| `MinecraftServer.currentTick` для плагинов, T-107 | — | 0046 |
-| Задержка 0 у планировщиков Folia от плагинов в режиме совместимости (InvSee++), T-107 | — | 0047 / paper 0025 |
-| `/dialog show` / `/dialog clear` снова есть, диалог отправляется на потоке игрока. Conversation API работает: ввод из чата во время разговора уходит в разговор на потоке игрока (раньше `UnsupportedOperationException` и сломанный чат), таймаут `withTimeout` — на планировщике собеседника, а не Bukkit scheduler, T-021 | #434, #216 | 0048 / api 0008 |
-| Лишние незер-порталы — не воспроизводится на 26.3: 6 и 30 предметов в новый портал в одном тике, два портала по 10 предметов в одну область незера и два игрока одновременно дают ровно один портал на той стороне (повторный поиск перед созданием, `existingTryAgain`), T-017 | #69 | — |
-| Плагин в режиме совместимости на потоке региона видит в `World#getEntities` / `getLivingEntities` / `getEntitiesByClass` только сущности своего региона (LevelledMobs в `PlayerTeleportEvent`), T-109 | — | paper 0026 |
-| Отчёт совместимости `/tessera compat`: проваленные проверки потока, синхронные телепорты и обходы сущностей мира у плагинов в режиме совместимости — плагин, метод API, поток (глобальный, регион, другой), число и первый стек; `/tessera compat <плагин>`, `dump` в файл, `reset`, T-104 | — | paper 0027 |
-| Отклонённое до `PlayerInteractEntityEvent` взаимодействие с сущностью (цель в другом регионе, за границей мира, вне досягаемости, не найдена) переотправляет инвентарь игрока и экипировку цели: аллай больше не «забирает» предмет только на клиенте, T-022 | #502 | 0050 |
-| `recipe_book_add` не кодируется — не воспроизводится на 26.3, и это не Folia: в #303 падал компонент `minecraft:equippable` с `null` вместо `Optional` у предмета плагина (Paper 1.21.4). Сейчас `CraftEquippableComponent` собирает все `Optional` через `ofNullable`/`empty`; рецепты плагина (shaped и shapeless) с таким предметом в результате и ингредиенте отправляются через `/recipe give` без ошибок, T-024 | #303 | — |
-| Ошибка генерации блоков — не воспроизводится на 26.3: 1024 чанка с одним сидом, сгенерированные по одному и все сразу из четырёх углов (разные регионы), без битого рельефа и ошибок. Расходятся только фичи, которые пишут в соседний чанк (пятна андезита/диорита/гранита, руды, айсберги): какая перекроет другую, зависит от порядка декорирования соседей — так же расходятся два одинаковых параллельных прогона и ванильная генерация при другом порядке загрузки, T-026 | #61 | — |
-| Management server (JSON-RPC) работает: методы выполняются на глобальном тике (раньше все падали с `UnsupportedOperationException`), соединения тикают раз в глобальный тик, `players/kick` без удаления игрока с чужого потока, `server/status` — `started: true`. Проверены status, players, difficulty, gamerules, allowlist, operators, system_message, save, view_distance, kick, stop, T-033 | #416 | 0051 |
-| `teleportAsync` из `PlayerJoinEvent` больше не роняет регион: игрок, который ещё входит, телепортируется в следующем своём тике (другой регион, другой мир, тот же регион), прямой вызов `Entity#teleportAsync` во время входа возвращает `false`, T-067 | — | 0052 / paper 0028 |
-| Watchdog при зависании региона пишет число чанков, сущностей и игроков региона, состояние потока, блокировку, которую он ждёт, и её владельца, мониторы по кадрам стека и удерживаемые `Lock`; стек владельца ожидаемой блокировки (до 3 шагов) и пометку `DEADLOCKED`. Проверено на взаимной блокировке двух регионов (монитор + `ReentrantLock`), T-034 | #447, #437, #196 | 0053 |
+| Map autosave | #505 | 0015 |
+| Region checks in AI | #523, #525, #526, #527, #495 | 0016 |
+| Village POI without a shared lock | #530 | 0017 |
+| Chat during shutdown | #461 | 0018 |
+| `playersByName` is thread-safe | #497 | 0019 |
+| Autosave of unsaved players | #459 | 0020 |
+| Ender dragon parts | #427, #504 | 0021 |
+| Villagers in portals ("World mismatch") | #431 | 0022 |
+| Protocol switch does not block threads, finish_configuration spam | #454, #520 | 0023 |
+| World cleanup from `onDisable` | #353 | 0024 / paper 0009 |
+| Thread-safe hide/showPlayer | #406 | paper 0007 |
+| Mob target type cache | #522 | paper 0008 |
+| Tessera branding, GitHub Release for every build | — | build.gradle.kts.patch, release.yml |
+| World loading and unloading (`createWorld` / `unloadWorld`), T-001 | #134 | 0025 / paper 0010 |
+| `PlayerTeleportEvent` / `EntityTeleportEvent` and portal events for async teleports, T-002 | #490, #330 | 0026 / api 0005 |
+| Thread-safe scoreboard: personal boards, teams, `/team`, `/scoreboard`, T-004 | #25 | 0027 / paper 0011 |
+| `PlayerBucketEmptyEvent` result is per thread, T-027 | — | 0028 |
+| Region report (`getRegionReport`, `getRegionReports`) and JMX `dev.tessera:type=Region`, T-003 | #299, #398 | 0029 / paper 0012 / api 0006 |
+| Built-in spark for regions: region thread profile, TPS of the slowest region, T-037 | #299 | paper 0013 |
+| Console log style choice (`pretty` / `classic`), T-050 | — | paper 0014 |
+| `pretty` colors: level, plugin tag, `NO_COLOR` / `FORCE_COLOR`, Pterodactyl, T-051 | — | paper 0015 |
+| Region in the `pretty` log line (`[world x,z]`, `[global]`, `[global > world x,z]` for borrowed), T-052 | — | paper 0016 |
+| Short stack traces in `pretty`: folding reflection/netty/log4j/scheduler, plugin frames with the jar name, tail below the last plugin frame → `... N more`, T-053 | — | paper 0017 |
+| With `max-players=N` exactly N players can join (previously N−1), T-036 | — | 0030 |
+| Boss bars and `/data storage` are thread-safe (`ServerBossEvent`, `CustomBossEvents`, `CommandStorage`), T-035 | — | 0031, 0032 |
+| `LevelStorageSource.resources` is a `ConcurrentHashMap`, T-035 | — | 0033 |
+| Respawn anchor consumes a charge again, charged on the anchor's region, T-035 | — | 0034 |
+| Treasure map to a target structure no longer crashes (`tryReference`), T-035 | — | 0035 |
+| Advancement triggers for target block, curing a zombie villager and picking up a thrown item run on the player's thread, T-035 | — | 0036 |
+| `getRespawnLocation()` with a point in another world or region returns the saved point instead of `World mismatch`. `setRespawnLocation` itself does not erase the point on 26.3: with `forced` it survives death and rejoin, without `forced` and without a bed/anchor it is reset, as on Paper, T-011 | #337 | paper 0018 / api 0007 |
+| `PlayerRespawnEvent` / `PlayerPostRespawnEvent` are fired again (after death and when leaving the End), on the respawn point's region. A mounted player leaves the End to the world spawn, as in vanilla; the vehicle gets `EntityPortalEvent` (T-002), T-012 | #453 | 0037 |
+| The fishing bobber is removed when the player moved to another world or region (previously it hung forever); `player.fishing` is cleared only on the player's thread, the rod can be cast again right away, T-014 | #435 | 0038 |
+| `teleportAsync` with `TeleportFlag.Relative.VELOCITY_*` keeps velocity (with `VELOCITY_ROTATION` it rotates it), as on Paper: in its own region, in a foreign one and in another world; for players the flags go into the position packet. Without flags velocity is reset, as on Paper, which is the way to reset it. A listener that changes the destination in the teleport event resets velocity, T-015 | #441 | 0039 / paper 0019 |
+| The first pearl into a new end gateway reaches the outer islands: a gateway in the End without an exit looks for it in advance when a player is near (32 blocks), and pearls and other entities (not players) that enter before the exit is found wait inside the gateway. A player who enters the gateway before the search finishes is still not teleported on the first try, T-016 | #51 | 0040 |
+| Wither roses drop again if the wither skull went through a portal or into another region: the victim remembers the wither skull hit and, on death without a killer within 100 ticks, drops a rose. A wither in another region does not heal from the kill, damage of such a skull stays 5, T-018 | #388 | 0041 |
+| The locator bar (`locator_bar`) works again: waypoints are tracked across regions, each player updates their links once per tick on their own thread, like vanilla on movement; checked with bots: track/update/untrack in own and foreign region, turning the rule off and on, T-020 | #370 | 0049 |
+| BlockState from ItemMeta with coordinates 0,0,0 — not reproducible on 26.3: the state from `BlockStateMeta#getBlockState()` is not bound to a world (`isPlaced() == false`), inventory, `update()` and `setBlockState` work, `open()`/`close()` throw "must be placed", as on Paper; there is no thread check on 0,0,0 (chest, barrel, shulker, furnace, beehive), T-023 | #328 | — |
+| Hoppers do not pick up items — not reproducible, behaviour matches Paper 26.3: picking up falling items across chunk and region borders (1533/1536 vs 1532/1536), hopper chains with comparators match item for item, the farm from the issue "leaks" the same way on 26.3 and on Paper. Locking the bottom hopper with a torch in a classic sorter was not checked separately, T-010 | #209 | — |
+| Note blocks do not react to redstone and do not change pitch — not a Folia bug: this is the Paper setting `block-updates.disable-noteblock-updates: true` (and `disable-tripwire-updates` for tripwires), enabled by ItemsAdder/Oraxen/Nexo. With default settings on Tessera a note block plays from redstone (NotePlayEvent) and pulses an observer the same as on Paper 26.3; with the setting, the same symptoms as in the issue, T-013 | #470 | — |
+| Compatibility mode: plugins without `folia-supported` and `BukkitScheduler`, T-101, T-102 | — | 0042 / paper 0020 |
+| Region borrowing: compatibility-mode plugin tasks change blocks and entities, T-103a | — | 0043 / paper 0021 |
+| Compatibility-mode plugin commands run on the global thread with region borrowing, T-103b | — | paper 0022 |
+| Synchronous `teleport` for compatibility-mode plugins via `teleportAsync`, T-103c | — | paper 0023 |
+| Synchronous chunk load for compatibility-mode plugins (PaperLib in EssentialsX), T-103d | — | 0044 |
+| Brigadier commands for compatibility-mode plugins (Skript), T-103e | — | 0045 / paper 0024 |
+| `MinecraftServer.currentTick` for plugins, T-107 | — | 0046 |
+| Delay 0 in Folia schedulers from compatibility-mode plugins (InvSee++), T-107 | — | 0047 / paper 0025 |
+| `/dialog show` / `/dialog clear` are back, the dialog is sent on the player's thread. Conversation API works: chat input during a conversation goes to the conversation on the player's thread (previously `UnsupportedOperationException` and broken chat), the `withTimeout` timeout runs on the conversing entity's scheduler rather than the Bukkit scheduler, T-021 | #434, #216 | 0048 / api 0008 |
+| Extra nether portals — not reproducible on 26.3: 6 and 30 items into a new portal in one tick, two portals with 10 items each into the same nether area, and two players at once give exactly one portal on the other side (repeat search before creating, `existingTryAgain`), T-017 | #69 | — |
+| A compatibility-mode plugin on a region thread sees only its own region's entities in `World#getEntities` / `getLivingEntities` / `getEntitiesByClass` (LevelledMobs in `PlayerTeleportEvent`), T-109 | — | paper 0026 |
+| `/tessera compat` compatibility report: failed thread checks, synchronous teleports and world entity iteration by compatibility-mode plugins — plugin, API method, thread (global, region, other), count and first stack; `/tessera compat <plugin>`, `dump` to a file, `reset`, T-104 | — | paper 0027 |
+| Entity interaction rejected before `PlayerInteractEntityEvent` (target in another region, beyond the world border, out of reach, not found) resends the player's inventory and the target's equipment: an allay no longer "takes" an item only client-side, T-022 | #502 | 0050 |
+| `recipe_book_add` fails to encode — not reproducible on 26.3, and not Folia: in #303 the `minecraft:equippable` component of a plugin item failed with `null` instead of `Optional` (Paper 1.21.4). Now `CraftEquippableComponent` builds all `Optional`s via `ofNullable`/`empty`; plugin recipes (shaped and shapeless) with such an item as result and ingredient are sent via `/recipe give` without errors, T-024 | #303 | — |
+| Block generation error — not reproducible on 26.3: 1024 chunks with one seed, generated one by one and all at once from four corners (different regions), without broken terrain or errors. Only features that write into a neighbouring chunk differ (andesite/diorite/granite patches, ores, icebergs): which overrides which depends on the neighbours' decoration order — two identical parallel runs and vanilla generation with a different load order differ the same way, T-026 | #61 | — |
+| Management server (JSON-RPC) works: methods run on the global tick (previously all failed with `UnsupportedOperationException`), connections tick once per global tick, `players/kick` without removing the player from a foreign thread, `server/status` returns `started: true`. Checked status, players, difficulty, gamerules, allowlist, operators, system_message, save, view_distance, kick, stop, T-033 | #416 | 0051 |
+| `teleportAsync` from `PlayerJoinEvent` no longer crashes the region: a player who is still joining is teleported on their next tick (another region, another world, same region), a direct `Entity#teleportAsync` call during join returns `false`, T-067 | — | 0052 / paper 0028 |
+| On a region hang the watchdog prints the region's chunk, entity and player counts, the thread state, the lock it waits for and its owner, monitors per stack frame and held `Lock`s; the stack of the awaited lock's owner (up to 3 hops) and a `DEADLOCKED` mark. Checked on a deadlock between two regions (monitor + `ReentrantLock`), T-034 | #447, #437, #196 | 0053 |
