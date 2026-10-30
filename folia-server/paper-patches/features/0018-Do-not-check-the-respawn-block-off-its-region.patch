@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:46:25 +0300
+Subject: [PATCH] Do not check the respawn block off its region
+
+getRespawnLocation() looks up the bed or anchor block from the calling
+thread. When the respawn point is in another world or region this read
+fails with a world mismatch. Return the stored location instead, the
+same as getRespawnLocation(false), and keep the check when the caller
+owns the respawn point.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftOfflinePlayer.java b/src/main/java/org/bukkit/craftbukkit/CraftOfflinePlayer.java
+index 1aa8f1e0a3093a8b9e77213c56f987cd6ca7df86..3171c3615155882260aefea14b9534b469757c50 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftOfflinePlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftOfflinePlayer.java
+@@ -375,8 +375,9 @@ public class CraftOfflinePlayer implements OfflinePlayer, ConfigurationSerializa
+         final ServerLevel level = this.server.console.getLevel(respawnConfig.respawnData().dimension());
+         if (level == null) return null;
+ 
+-        if (!loadLocationAndValidate) {
+-            return CraftLocation.toBukkit(respawnConfig.respawnData().pos(), level, respawnConfig.respawnData().yaw(), respawnConfig.respawnData().pitch());
++        // Tessera - the spawn block can only be checked on the region that owns it, elsewhere return the stored location
++        if (!loadLocationAndValidate || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(level, respawnConfig.respawnData().pos(), 4)) {
++            return CraftLocation.toBukkit(respawnConfig.respawnData().pos(), level,respawnConfig.respawnData().yaw(), respawnConfig.respawnData().pitch());
+         }
+ 
+         return ServerPlayer.findRespawnAndUseSpawnBlock(level, respawnConfig, false)
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index 5b202a3fcb618c8bac860d88cbef0dc71bf92cde..ae6c6cd0e6c89585f149dd68c521dc2919ad4fe6 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -1417,7 +1417,8 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+         final ServerLevel world = this.server.getServer().getLevel(respawnData.dimension());
+         if (world == null) return null;
+ 
+-        if (!loadLocationAndValidate) {
++        // Tessera - the spawn block can only be checked on the region that owns it, elsewhere return the stored location
++        if (!loadLocationAndValidate || !ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(world, respawnData.pos(), 4)) {
+             return CraftLocation.toBukkit(respawnData.pos(), world, respawnData.yaw(), respawnData.pitch());
+         }
+ 
