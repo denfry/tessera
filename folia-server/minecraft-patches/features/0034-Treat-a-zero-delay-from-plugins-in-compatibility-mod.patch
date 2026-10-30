@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 10:34:20 +0300
+Subject: [PATCH] Treat a zero delay from plugins in compatibility mode as the
+ next tick in the region scheduler
+
+
+diff --git a/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java b/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
+index a82640656a554982f1ba80daf0799289d4126119..3b03dac107568dc1c261d9fdaf76cebacb003d83 100644
+--- a/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/scheduler/FoliaRegionScheduler.java
+@@ -79,10 +79,11 @@ public final class FoliaRegionScheduler implements RegionScheduler {
+ 
+     @Override
+     public ScheduledTask runDelayed(final Plugin plugin, final World world, final int chunkX, final int chunkZ,
+-                                    final Consumer<ScheduledTask> task, final long delayTicks) {
++                                    final Consumer<ScheduledTask> task, long delayTicks) {
+         Objects.requireNonNull(plugin, "Plugin may not be null");
+         Objects.requireNonNull(world, "World may not be null");
+         org.apache.commons.lang3.Validate.notNull(task, "Task may not be null");
++        delayTicks = io.papermc.paper.threadedregions.TesseraCompat.compatDelay(plugin, delayTicks); // Tessera - compatibility mode
+         if (delayTicks <= 0) {
+             throw new IllegalArgumentException("Delay ticks may not be <= 0");
+         }
+@@ -116,10 +117,11 @@ public final class FoliaRegionScheduler implements RegionScheduler {
+ 
+     @Override
+     public ScheduledTask runAtFixedRate(final Plugin plugin, final World world, final int chunkX, final int chunkZ,
+-                                        final Consumer<ScheduledTask> task, final long initialDelayTicks, final long periodTicks) {
++                                        final Consumer<ScheduledTask> task, long initialDelayTicks, final long periodTicks) {
+         Objects.requireNonNull(plugin, "Plugin may not be null");
+         Objects.requireNonNull(world, "World may not be null");
+         Objects.requireNonNull(task, "Task may not be null");
++        initialDelayTicks = io.papermc.paper.threadedregions.TesseraCompat.compatDelay(plugin, initialDelayTicks); // Tessera - compatibility mode
+         if (initialDelayTicks <= 0) {
+             throw new IllegalArgumentException("Initial delay ticks may not be <= 0");
+         }

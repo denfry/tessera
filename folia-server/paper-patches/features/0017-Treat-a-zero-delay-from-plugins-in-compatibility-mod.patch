@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 10:34:20 +0300
+Subject: [PATCH] Treat a zero delay from plugins in compatibility mode as the
+ next tick
+
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index 2df65185d48e85ae6bab09a21cdc1d1754c924f8..46eef72899f8c5e8e33c5466f9aa8a1c06d6641c 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -140,6 +140,14 @@ public final class TesseraCompat {
+         return plugin != null && isCompat(plugin) ? plugin : null;
+     }
+ 
++    /**
++     * A delay of zero or less from a plugin in compatibility mode means the next tick, as in {@code BukkitScheduler};
++     * the Folia schedulers reject it. Some plugins detect Folia and call its schedulers this way.
++     */
++    public static long compatDelay(final Plugin plugin, final long ticks) {
++        return ticks <= 0L && enabled() && plugin != null && isCompat(plugin) ? 1L : ticks;
++    }
++
+     /**
+      * Returns the plugin in compatibility mode that registered the brigadier command, or {@code null}. Commands added to
+      * the dispatcher without the Paper API, as Skript does, are matched by the class loader of their executor. Commands
+diff --git a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java
+index 15f31c11faa83e410d969fad58459960c037acd5..22d674a7b07d5883002b10aa41d4c5bb1ab0a869 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java
++++ b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaEntityScheduler.java
+@@ -63,9 +63,10 @@ public final class FoliaEntityScheduler implements EntityScheduler {
+ 
+     @Override
+     public @Nullable ScheduledTask runDelayed(final Plugin plugin, final Consumer<ScheduledTask> task, final Runnable retired,
+-                                              final long delayTicks) {
++                                              long delayTicks) {
+         Objects.requireNonNull(plugin, "Plugin may not be null");
+         Objects.requireNonNull(task, "Task may not be null");
++        delayTicks = io.papermc.paper.threadedregions.TesseraCompat.compatDelay(plugin, delayTicks); // Tessera - compatibility mode
+         if (delayTicks <= 0) {
+             throw new IllegalArgumentException("Delay ticks may not be <= 0");
+         }
+@@ -97,9 +98,10 @@ public final class FoliaEntityScheduler implements EntityScheduler {
+ 
+     @Override
+     public @Nullable ScheduledTask runAtFixedRate(final Plugin plugin, final Consumer<ScheduledTask> task,
+-                                                  final Runnable retired, final long initialDelayTicks, final long periodTicks) {
++                                                  final Runnable retired, long initialDelayTicks, final long periodTicks) {
+         Objects.requireNonNull(plugin, "Plugin may not be null");
+         Objects.requireNonNull(task, "Task may not be null");
++        initialDelayTicks = io.papermc.paper.threadedregions.TesseraCompat.compatDelay(plugin, initialDelayTicks); // Tessera - compatibility mode
+         if (initialDelayTicks <= 0) {
+             throw new IllegalArgumentException("Initial delay ticks may not be <= 0");
+         }
+diff --git a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+index b2713dbab6bc4c9d863278a03904ed409cd8961e..c78e3152b695fb19e035987efb3e67b3b97eebdb 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
++++ b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+@@ -53,9 +53,10 @@ public class FoliaGlobalRegionScheduler implements GlobalRegionScheduler {
+     }
+ 
+     @Override
+-    public ScheduledTask runDelayed(final Plugin plugin, final Consumer<ScheduledTask> task, final long delayTicks) {
++    public ScheduledTask runDelayed(final Plugin plugin, final Consumer<ScheduledTask> task, long delayTicks) {
+         Objects.requireNonNull(plugin, "Plugin may not be null");
+         Objects.requireNonNull(task, "Task may not be null");
++        delayTicks = io.papermc.paper.threadedregions.TesseraCompat.compatDelay(plugin, delayTicks); // Tessera - compatibility mode
+         if (delayTicks <= 0) {
+             throw new IllegalArgumentException("Delay ticks may not be <= 0");
+         }
+@@ -84,9 +85,10 @@ public class FoliaGlobalRegionScheduler implements GlobalRegionScheduler {
+     }
+ 
+     @Override
+-    public ScheduledTask runAtFixedRate(final Plugin plugin, final Consumer<ScheduledTask> task, final long initialDelayTicks, final long periodTicks) {
++    public ScheduledTask runAtFixedRate(final Plugin plugin, final Consumer<ScheduledTask> task, long initialDelayTicks, final long periodTicks) {
+         Objects.requireNonNull(plugin, "Plugin may not be null");
+         Objects.requireNonNull(task, "Task may not be null");
++        initialDelayTicks = io.papermc.paper.threadedregions.TesseraCompat.compatDelay(plugin, initialDelayTicks); // Tessera - compatibility mode
+         if (initialDelayTicks <= 0) {
+             throw new IllegalArgumentException("Initial delay ticks may not be <= 0");
+         }

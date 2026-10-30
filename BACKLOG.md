@@ -264,6 +264,8 @@
 
 #### T-107 Поля и API Paper, которых нет в Folia
 - `MinecraftServer.currentTick` возвращено (тики глобального региона). Готово.
+- Задержка 0 у планировщиков Folia от плагина в режиме совместимости означает следующий тик, как в `BukkitScheduler`
+  (InvSee++ сам переходит на API Folia и передаёт 0). Готово.
 - Осталось: `MinecraftServer#execute` / `MCUtil.MAIN_EXECUTOR` (FAWE ставит через него тикеты), `Server#getTickTimes`
   и `getAverageTickTime` вне потока региона (TabTPS показывает MSPT 0 и `Long.MAX_VALUE`).
 
@@ -367,3 +369,4 @@
 | Синхронная загрузка чанка у плагинов в режиме совместимости (PaperLib в EssentialsX), T-103d | — | 0031 |
 | Команды brigadier у плагинов в режиме совместимости (Skript), T-103e | — | 0032 / paper 0016 |
 | `MinecraftServer.currentTick` для плагинов, T-107 | — | 0033 |
+| Задержка 0 у планировщиков Folia от плагинов в режиме совместимости (InvSee++), T-107 | — | 0034 / paper 0017 |

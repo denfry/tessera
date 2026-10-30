@@ -200,6 +200,10 @@ while True:
             print('JOINED (play login) after %.2fs' % (joined_at - t0))
         elif pid == 45:
             c.send(28, data)
+        elif pid == 60:  # open_screen: container id, menu type, title component
+            cid, i = read_varint_buf(data)
+            mtype, i = read_varint_buf(data, i)
+            print('SCREEN: type %d %s' % (mtype, nbt_texts(data[i:])), flush=True)
         elif pid == 124:  # system_chat: text component, overlay
             print('CHAT:', nbt_texts(data), flush=True)
         elif pid == 32:
