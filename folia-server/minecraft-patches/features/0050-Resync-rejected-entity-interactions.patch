@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Fri, 30 Oct 2026 11:06:07 +0300
+Subject: [PATCH] Resync rejected entity interactions
+
+
+diff --git a/net/minecraft/server/network/ServerGamePacketListenerImpl.java b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+index 55e1ab66b0624008879fb238b7fb199f35ef9b8d..d6341cd397aca354e95e206174c783cb9217b693 100644
+--- a/net/minecraft/server/network/ServerGamePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerGamePacketListenerImpl.java
+@@ -3008,6 +3008,32 @@ public class ServerGamePacketListenerImpl
+         }
+     }
+ 
++    // Tessera start - resync rejected entity interactions
++    // the client predicts some interactions (an allay taking the held item), so an interaction the server drops before
++    // the event must restore the held item and the equipment of the target, like a cancelled PlayerInteractEntityEvent
++    private void resyncRejectedInteraction(final @Nullable Entity target) {
++        this.player.containerMenu.sendAllDataToRemote();
++        if (!(target instanceof LivingEntity)) {
++            return;
++        }
++        final ServerPlayer viewer = this.player;
++        final java.util.function.Consumer<Entity> resend = (Entity entity) -> {
++            if (entity instanceof LivingEntity living && viewer.connection != null) {
++                viewer.connection.send(new net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket(
++                    living.getId(), java.util.Arrays.stream(net.minecraft.world.entity.EquipmentSlot.values())
++                    .map((slot) -> com.mojang.datafixers.util.Pair.of(slot, living.getItemBySlot(slot).copy()))
++                    .collect(Collectors.toList()), true));
++                living.refreshEntityData(viewer);
++            }
++        };
++        if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(target)) {
++            resend.accept(target);
++        } else {
++            target.getBukkitEntity().taskScheduler.schedule(resend, null, 1L);
++        }
++    }
++    // Tessera end - resync rejected entity interactions
++
+     @Override
+     public void handleInteract(final ServerboundInteractPacket packet) {
+         PacketUtils.ensureRunningOnSameThread(packet, this, this.player.level());
+@@ -3090,13 +3116,22 @@ public class ServerGamePacketListenerImpl
+                             }
+                         }
+                     }
++                } else {
++                    this.resyncRejectedInteraction(target); // Tessera - resync rejected entity interactions
+                 }
+             }
+             // Paper start - PlayerUseUnknownEntityEvent
+             else if (target == null) {
+                 CraftEventFactory.callPlayerUseUnknownEntityEvent(ServerGamePacketListenerImpl.this.player, packet.entityId(), false, packet.hand(), packet.location());
++                this.resyncRejectedInteraction(null); // Tessera - resync rejected entity interactions
+             }
+             // Paper end - PlayerUseUnknownEntityEvent
++            // Tessera start - resync rejected entity interactions
++            else {
++                // the target is owned by another region or outside the world border
++                this.resyncRejectedInteraction(target);
++            }
++            // Tessera end - resync rejected entity interactions
+             if (io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.updateEquipmentOnPlayerActions) this.player.detectEquipmentUpdates(); // Paper - Force update attributes.
+         }
+     }
