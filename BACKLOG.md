@@ -63,10 +63,6 @@
   Ещё проверить: `ServerLevel#getMapData` зовёт `MapInitializeEvent` внутри `ConcurrentHashMap.computeIfAbsent` —
   плагин, который в обработчике трогает другую карту (ImageFrame), может получить `Recursive update`.
 
-### T-022 Аллай после отказанного взаимодействия рассинхронизирует инвентарь клиента — [#502](https://github.com/PaperMC/Folia/issues/502)
-- **Где.** `Allay#mobInteract`, отмена `PlayerInteractEntityEvent`. После отмены клиенту не отправляется ресинхронизация
-  слота и экипировки.
-
 ### T-023 BlockState из ItemMeta получает координаты 0,0,0 — [#328](https://github.com/PaperMC/Folia/issues/328)
 - **Где.** `CraftMetaBlockState`, `CraftBlockStates#getBlockState(world, pos, ...)` с фиктивным миром.
 
@@ -358,3 +354,4 @@
 | `/dialog show` / `/dialog clear` снова есть, диалог отправляется на потоке игрока. Conversation API работает: ввод из чата во время разговора уходит в разговор на потоке игрока (раньше `UnsupportedOperationException` и сломанный чат), таймаут `withTimeout` — на планировщике собеседника, а не Bukkit scheduler, T-021 | #434, #216 | 0048 / api 0008 |
 | Лишние незер-порталы — не воспроизводится на 26.3: 6 и 30 предметов в новый портал в одном тике, два портала по 10 предметов в одну область незера и два игрока одновременно дают ровно один портал на той стороне (повторный поиск перед созданием, `existingTryAgain`), T-017 | #69 | — |
 | Плагин в режиме совместимости на потоке региона видит в `World#getEntities` / `getLivingEntities` / `getEntitiesByClass` только сущности своего региона (LevelledMobs в `PlayerTeleportEvent`), T-109 | — | paper 0026 |
+| Отклонённое до `PlayerInteractEntityEvent` взаимодействие с сущностью (цель в другом регионе, за границей мира, вне досягаемости, не найдена) переотправляет инвентарь игрока и экипировку цели: аллай больше не «забирает» предмет только на клиенте, T-022 | #502 | 0050 |
