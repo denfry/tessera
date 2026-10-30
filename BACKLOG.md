@@ -57,10 +57,6 @@ The workflow, code rules and test harness are in [AGENTS.md](AGENTS.md); patch r
   the same: all lecterns taken in ~8 s, not a single `LOSING_JOB` in 4 min. Not checked: day/night cycle, unloading and
   loading the farm chunks, villagers at a region border, a multi-hour run. If it comes up again, a world with the farm is needed.
 
-### T-032 Lock contention — [#291](https://github.com/PaperMC/Folia/issues/291)
-- Take a contention profile (JFR `jdk.JavaMonitorEnter`, `jdk.ThreadPark`) with 50+ bots in different regions, find
-  hot monitors (as with POI in #530) and remove shared locks.
-
 ### T-034 Hangs and spontaneous shutdown — [#447](https://github.com/PaperMC/Folia/issues/447), [#437](https://github.com/PaperMC/Folia/issues/437), [#196](https://github.com/PaperMC/Folia/issues/196)
 - Few logs in the issues. Need watchdog dumps from live servers on Tessera.
 - Watchdog improved (0053, in "Done"). Remaining: collect hang dumps from live servers and analyze them.
@@ -306,3 +302,4 @@ Folia regions are already isolated, the next step is spreading them across proce
 | Zombie reinforcements do not load chunks. Crash not reproducible on 26.3: 40 reinforcement rounds at the edge of the loaded area, no errors; foreign targets are dropped by `Mob#asValidTarget`, T-030 | #386 | 0058 |
 | Not reproducible on 26.3 or already fixed, T-030: #334 (`BabyFollowAdult`, patch 0016), #152 (fishing hook, patch 0038), #327 (`PlayerList.remove` no longer ticks the player), #199 spectator path (Folia checks the camera). #381 and the log of #203: logs expired, the title of #381 points to a plugin calling `getEntities` off-region. `DragonFireball` needs no check: the gap between regions is wider than its search box | #334, #152, #327, #381 | — |
 | Villager behaviours do not wait for POI data on the region thread: `PoiCompetitorScan`, `AssignProfessionFromJobSite`, `YieldJobSite` and `ValidateNearbyPoi` skip the tick when the POI chunk is not loaded and keep the memory. `performance.poi-searches-load-chunks` in `config/tessera.yml` (default `true`, vanilla) keeps the `AcquirePoi` search off the disk. Checked: 4 villagers took 4 lecterns in both modes, no errors. The stall itself was not measured, T-031 | #292 | 0059 / paper 0030 |
+| Lock contention: no hot monitor found, no patch. JFR with thresholds of 1 ms, 50 idle bots in about 40 regions, 6 region threads, 2 minutes: 0.07 s in monitors on region threads, 2.7 s in `ThreadedTicketLevelPropagator.await`, 0.4 s in `ThreadedRegionizer` and the rest is the scheduler waiting for work. Not covered: bots do not build or fight and no plugins were loaded, so re-check on a live profile, T-032 | #291 | — |

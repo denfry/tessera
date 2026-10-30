@@ -8,8 +8,9 @@
 #   tools/testserver.sh errors <dir>        print ERROR lines and exceptions from the log; exit 1 if there are any
 #   tools/testserver.sh stop <dir>          stop through RCON, kill the process if it does not exit
 #
-# Environment: TESSERA_JAVA (java 25 binary, default: java on PATH), TESSERA_TEST_PORT (game port of a new
-# server, default 25600; RCON uses the next port). Plugins for the test go into <dir>/plugins.
+# Environment: TESSERA_JAVA (java 25 binary, default: java on PATH), TESSERA_JAVA_OPTS (extra JVM flags),
+# TESSERA_TEST_PORT (game port of a new server, default 25600; RCON uses the next port).
+# Plugins for the test go into <dir>/plugins.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -46,7 +47,7 @@ start() {
     init "$dir"
     cp "$jar" "$dir/server.jar"
     rm -f "$dir/out.log"
-    (cd "$dir" && nohup "$JAVA" -Xmx2G -jar server.jar --nogui > out.log 2>&1 & echo $! > "$dir/server.pid")
+    (cd "$dir" && nohup "$JAVA" -Xmx2G ${TESSERA_JAVA_OPTS:-} -jar server.jar --nogui > out.log 2>&1 & echo $! > "$dir/server.pid")
     for _ in $(seq 1 600); do
         grep -qE 'Done \(' "$dir/out.log" 2>/dev/null && { echo "started: port $(property "$dir" server-port), rcon $(property "$dir" rcon.port)"; return 0; }
         grep -qE 'Failed to start|Exception in server tick loop' "$dir/out.log" 2>/dev/null && break
