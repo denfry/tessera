@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Fri, 30 Oct 2026 10:17:10 +0300
+Subject: [PATCH] Search for the end gateway exit before the first teleport
+
+
+diff --git a/net/minecraft/world/level/block/EndGatewayBlock.java b/net/minecraft/world/level/block/EndGatewayBlock.java
+index b14e8ba3ea41951b28ab82c2a0030186baff9549..e99f419e204744a68c131d3168fcdcb4e363dbb0 100644
+--- a/net/minecraft/world/level/block/EndGatewayBlock.java
++++ b/net/minecraft/world/level/block/EndGatewayBlock.java
+@@ -87,6 +87,17 @@ public class EndGatewayBlock extends BaseEntityBlock implements Portal {
+         final boolean isPrecise
+     ) {
+         if (!new io.papermc.paper.event.entity.EntityInsideBlockEvent(entity.getBukkitEntity(), org.bukkit.craftbukkit.block.CraftBlock.at(level, pos)).callEvent()) { return; } // Paper - Add EntityInsideBlockEvent
++        // Tessera start - keep entities in the gateway until its exit is found
++        // they retry once the cooldown ends instead of flying through, players are not held
++        if (entity.canUsePortal(false)
++            && !level.isClientSide()
++            && !(entity instanceof net.minecraft.world.entity.player.Player)
++            && level.getBlockEntity(pos) instanceof TheEndGatewayBlockEntity waitingGateway
++            && waitingGateway.isWaitingForExit(level)) {
++            entity.setDeltaMovement(Vec3.ZERO);
++            entity.setPos(Vec3.atCenterOf(pos).subtract(0.0, entity.getBbHeight() / 2.0, 0.0));
++        }
++        // Tessera end - keep entities in the gateway until its exit is found
+         if (entity.canUsePortal(false)
+             && !level.isClientSide()
+             && level.getBlockEntity(pos) instanceof TheEndGatewayBlockEntity endGatewayBlockEntity
+diff --git a/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java b/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
+index 53b47d04f3643775ee6b12f40a1c48eeb5f2e794..271d6a38724ab69abda4d0723055c5bc2c5f1607 100644
+--- a/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
++++ b/net/minecraft/world/level/block/entity/TheEndGatewayBlockEntity.java
+@@ -84,7 +84,23 @@ public class TheEndGatewayBlockEntity extends TheEndPortalBlockEntity {
+         if (spawning != entity.isSpawning() || coolingDown != entity.isCoolingDown()) {
+             setChanged(level, pos, state);
+         }
++        // Tessera start - search for the exit before the first entity arrives
++        // the search is asynchronous, so the first teleport through a new gateway used to fail
++        if (entity.exitPortal == null && entity.searchingForExitId == null && entity.age % 20L == 0L
++            && level instanceof ServerLevel serverLevel && serverLevel.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END
++            && level.hasNearbyAlivePlayer(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5, 32.0)) {
++            entity.trySearchForExit(serverLevel, pos);
++        }
++        // Tessera end - search for the exit before the first entity arrives
++    }
++
++    // Tessera start - search for the exit before the first entity arrives
++    // in the end a gateway without an exit always starts a search on the first teleport attempt
++    public boolean isWaitingForExit(final Level level) {
++        return this.exitPortal == null && level instanceof ServerLevel serverLevel
++            && serverLevel.getTypeKey() == net.minecraft.world.level.dimension.LevelStem.END;
+     }
++    // Tessera end - search for the exit before the first entity arrives
+ 
+     public boolean isSpawning() {
+         return this.age < 200L;
