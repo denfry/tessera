@@ -1,0 +1,295 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 08:55:09 +0300
+Subject: [PATCH] Enable the bundled spark profiler
+
+Folia switches the bundled spark off, and the spark plugin cannot run
+on Folia because it uses the Bukkit scheduler, so there was no way to
+profile a server. Turn the bundled spark back on, behind the existing
+spark.enabled setting, and adapt it to region threading:
+
+- profile the region scheduler threads by default, the server thread
+  is idle on Folia;
+- report the TPS of the slowest region and tick durations from the
+  ticks of all regions, instead of counting the ticks of every region
+  as ticks of one server;
+- do not provide tick hooks, they are called by every region at once
+  and spark expects one tick thread, so tick monitoring and
+  --only-ticks-over are unavailable;
+- take world counts from the region statistics instead of walking the
+  chunks of other regions.
+
+Fixes PaperMC/Folia#299
+
+diff --git a/src/main/java/io/papermc/paper/SparksFly.java b/src/main/java/io/papermc/paper/SparksFly.java
+index b332645ed65928100f580221d8a9948bc77e362e..8b453dbcbcc792e8e42985891e9ec026ddbc21cf 100644
+--- a/src/main/java/io/papermc/paper/SparksFly.java
++++ b/src/main/java/io/papermc/paper/SparksFly.java
+@@ -10,7 +10,6 @@ import java.util.List;
+ import java.util.concurrent.ConcurrentLinkedQueue;
+ import java.util.logging.Level;
+ import java.util.logging.Logger;
+-import me.lucko.spark.paper.api.Compatibility;
+ import me.lucko.spark.paper.api.PaperClassLookup;
+ import me.lucko.spark.paper.api.PaperScheduler;
+ import me.lucko.spark.paper.api.PaperSparkModule;
+@@ -42,7 +41,7 @@ public final class SparksFly {
+         // Folia - region threading
+         this.logger = Logger.getLogger(ID);
+         this.logger.log(Level.INFO, "This server bundles the spark profiler. For more information please visit https://docs.papermc.io/paper/profiling");
+-        this.spark = PaperSparkModule.create(Compatibility.VERSION_1_0, server, this.logger, new PaperScheduler() {
++        this.spark = new TesseraSparkPlugin(server, this.logger, new PaperScheduler() { // Tessera - enable in-built spark profiler
+             @Override
+             public void executeAsync(final Runnable runnable) {
+                 MCUtil.scheduleAsyncTask(this.catching(runnable, "asynchronous"));
+@@ -116,7 +115,7 @@ public final class SparksFly {
+ 
+     private void enable() {
+         if (!this.enabled) {
+-            if (false) { // Folia - disable in-built spark profiler
++            if (GlobalConfiguration.get().spark.enabled) { // Folia - disable in-built spark profiler // Tessera - enable in-built spark profiler
+                 this.enabled = true;
+                 this.spark.enable();
+             } else {
+@@ -168,7 +167,7 @@ public final class SparksFly {
+     }
+ 
+     public static boolean isPluginPreferred() {
+-        return true; // Folia - disable in-built spark profiler
++        return Boolean.getBoolean(PREFER_SPARK_PLUGIN_PROPERTY); // Folia - disable in-built spark profiler // Tessera - enable in-built spark profiler
+     }
+ 
+     private static boolean isPluginEnabled(final Server server) {
+diff --git a/src/main/java/io/papermc/paper/TesseraSparkPlugin.java b/src/main/java/io/papermc/paper/TesseraSparkPlugin.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..ba0f69ca310c1a68915fccac96282d0a9e77f97e
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/TesseraSparkPlugin.java
+@@ -0,0 +1,227 @@
++package io.papermc.paper;
++
++import ca.spottedleaf.common.time.TickData;
++import io.papermc.paper.threadedregions.RegionReport;
++import io.papermc.paper.threadedregions.RegionReports;
++import io.papermc.paper.threadedregions.ThreadedRegionizer;
++import io.papermc.paper.threadedregions.TickRegions;
++import it.unimi.dsi.fastutil.longs.LongArrayList;
++import java.util.ArrayList;
++import java.util.Collection;
++import java.util.List;
++import java.util.Set;
++import java.util.logging.Logger;
++import me.lucko.spark.api.statistic.misc.DoubleAverageInfo;
++import me.lucko.spark.paper.PaperSparkPlugin;
++import me.lucko.spark.paper.api.PaperClassLookup;
++import me.lucko.spark.paper.api.PaperScheduler;
++import me.lucko.spark.paper.common.metric.Metrics;
++import me.lucko.spark.paper.common.monitor.tick.TickStatistics;
++import me.lucko.spark.paper.common.platform.world.ChunkInfo;
++import me.lucko.spark.paper.common.platform.world.WorldInfoProvider;
++import me.lucko.spark.paper.common.sampler.ThreadDumper;
++import me.lucko.spark.paper.common.tick.TickHook;
++import me.lucko.spark.paper.common.tick.TickReporter;
++import me.lucko.spark.paper.common.util.ImmutableDoubleAverageInfo;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerLevel;
++import org.bukkit.Server;
++
++// Tessera start - enable in-built spark profiler
++/**
++ * The bundled spark, adapted to region threading.
++ * <ul>
++ *     <li>Profiles the region scheduler threads by default instead of the idle server thread.</li>
++ *     <li>TPS is the TPS of the slowest region, tick durations are taken from the ticks of all regions.</li>
++ *     <li>spark's tick hooks expect one tick thread, so they are not provided: tick monitoring and
++ *     {@code --only-ticks-over} are reported as unsupported.</li>
++ *     <li>World counts come from the region statistics; chunks are not walked from a foreign thread.</li>
++ * </ul>
++ */
++public final class TesseraSparkPlugin extends PaperSparkPlugin {
++
++    private static final String REGION_THREAD_PATTERN = "Folia Region Scheduler Thread #\\d+";
++
++    public TesseraSparkPlugin(final Server server, final Logger logger, final PaperScheduler scheduler, final PaperClassLookup classLookup) {
++        super(server, logger, scheduler, classLookup);
++    }
++
++    @Override
++    public ThreadDumper getDefaultThreadDumper() {
++        return new ThreadDumper.Regex(Set.of(REGION_THREAD_PATTERN));
++    }
++
++    @Override
++    public TickHook createTickHook() {
++        return null;
++    }
++
++    @Override
++    public TickReporter createTickReporter() {
++        return null;
++    }
++
++    @Override
++    public void onServerTickStart() {
++        // called by every region, see createTickHook
++    }
++
++    @Override
++    public void onServerTickEnd(final double duration) {
++        // called by every region, see createTickReporter
++    }
++
++    @Override
++    public TickStatistics createTickStatistics(final Metrics metrics) {
++        return new RegionTickStatistics();
++    }
++
++    @Override
++    public WorldInfoProvider createWorldInfoProvider() {
++        return new RegionWorldInfoProvider(super.createWorldInfoProvider());
++    }
++
++    private static List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions() {
++        final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> ret = new ArrayList<>();
++        for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
++            world.regioniser.computeForAllRegions(ret::add);
++        }
++        return ret;
++    }
++
++    private static List<TickData.TickReportData> reports(final RegionReport.Window window) {
++        final long currTime = System.nanoTime();
++        final List<TickData.TickReportData> ret = new ArrayList<>();
++        for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions()) {
++            final TickData.TickReportData report = RegionReports.getTickReport(region.getData().getRegionSchedulingHandle(), window, currTime);
++            if (report != null) {
++                ret.add(report);
++            }
++        }
++        return ret;
++    }
++
++    private static final class RegionTickStatistics implements TickStatistics {
++
++        private static double lowestTps(final RegionReport.Window window) {
++            double ret = 20.0;
++            for (final TickData.TickReportData report : reports(window)) {
++                ret = Math.min(ret, RegionReports.tps(report));
++            }
++            return ret;
++        }
++
++        private static DoubleAverageInfo durations(final RegionReport.Window window) {
++            final LongArrayList ticks = new LongArrayList();
++            for (final TickData.TickReportData report : reports(window)) {
++                ticks.addElements(ticks.size(), report.timePerTickData().rawData());
++            }
++            if (ticks.isEmpty()) {
++                return new ImmutableDoubleAverageInfo(0.0, 0.0, 0.0, 0.0, 0.0);
++            }
++            ticks.sort(null);
++            double sum = 0.0;
++            for (int i = 0, len = ticks.size(); i < len; ++i) {
++                sum += ticks.getLong(i);
++            }
++            final int last = ticks.size() - 1;
++            return new ImmutableDoubleAverageInfo(
++                sum / ticks.size() / 1.0E6, // mean
++                ticks.getLong(last) / 1.0E6, // max
++                ticks.getLong(0) / 1.0E6, // min
++                ticks.getLong(last / 2) / 1.0E6, // median
++                ticks.getLong((int) Math.ceil(last * 0.95)) / 1.0E6 // 95th percentile
++            );
++        }
++
++        @Override
++        public int gameTargetTps() {
++            return 20;
++        }
++
++        @Override
++        public double tps5Sec() {
++            return lowestTps(RegionReport.Window.SECONDS_5);
++        }
++
++        // Folia keeps 15s windows, not 10s
++        @Override
++        public double tps10Sec() {
++            return lowestTps(RegionReport.Window.SECONDS_15);
++        }
++
++        @Override
++        public double tps1Min() {
++            return lowestTps(RegionReport.Window.MINUTES_1);
++        }
++
++        @Override
++        public double tps5Min() {
++            return lowestTps(RegionReport.Window.MINUTES_5);
++        }
++
++        @Override
++        public double tps15Min() {
++            return lowestTps(RegionReport.Window.MINUTES_15);
++        }
++
++        @Override
++        public boolean isDurationSupported() {
++            return true;
++        }
++
++        @Override
++        public DoubleAverageInfo duration10Sec() {
++            return durations(RegionReport.Window.SECONDS_15);
++        }
++
++        @Override
++        public DoubleAverageInfo duration1Min() {
++            return durations(RegionReport.Window.MINUTES_1);
++        }
++
++        @Override
++        public DoubleAverageInfo duration5Min() {
++            return durations(RegionReport.Window.MINUTES_5);
++        }
++    }
++
++    private record RegionWorldInfoProvider(WorldInfoProvider delegate) implements WorldInfoProvider {
++
++        @Override
++        public CountsResult pollCounts() {
++            int players = 0;
++            int entities = 0;
++            int chunks = 0;
++            for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions()) {
++                final TickRegions.RegionStats stats = region.getData().getRegionStats();
++                players += stats.getPlayerCount();
++                entities += stats.getEntityCount();
++                chunks += stats.getChunkCount();
++            }
++            // block entities are only reachable through the chunks of other regions
++            return new CountsResult(players, entities, 0, chunks);
++        }
++
++        @Override
++        public ChunksResult<? extends ChunkInfo<?>> pollChunks() {
++            return null;
++        }
++
++        @Override
++        public GameRulesResult pollGameRules() {
++            return this.delegate.pollGameRules();
++        }
++
++        @Override
++        public Collection<DataPackInfo> pollDataPacks() {
++            return this.delegate.pollDataPacks();
++        }
++
++        @Override
++        public boolean mustCallSync() {
++            return this.delegate.mustCallSync();
++        }
++    }
++}
++// Tessera end - enable in-built spark profiler
