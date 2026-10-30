@@ -68,3 +68,6 @@ not because its page says it supports Folia.
 Check it on a test server (see "Проверка" in [BACKLOG.md](BACKLOG.md)): start it, use its main commands and features,
 join with players in different regions if the plugin touches players or the world, and read the log. Then add or update
 its row. When a Tessera release fixes a problem, re-check the plugin and update the row.
+
+For a plugin in compatibility mode, run `/tessera compat` after the check ([COMPAT.md](COMPAT.md)): every `failed`
+line is an API method that does not work for the plugin on that thread, and the Notes should name it.

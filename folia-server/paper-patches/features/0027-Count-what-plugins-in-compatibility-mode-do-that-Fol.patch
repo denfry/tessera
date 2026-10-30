@@ -1,0 +1,544 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Fri, 30 Oct 2026 11:31:24 +0300
+Subject: [PATCH] Count what plugins in compatibility mode do that Folia does
+ not allow
+
+A plugin in compatibility mode that fails a thread check only leaves an
+error in the log, and the handled cases (synchronous teleport, entity
+lists cut down to the region) leave nothing, so it is hard to say what
+exactly does not work for the plugin. Failed thread checks, synchronous
+teleports and entity lists of plugins in compatibility mode are now
+counted by plugin, API method and thread (global, region, other), with
+the stack of the first call.
+
+/tessera compat (permission tessera.command.compat) shows the summary,
+/tessera compat <plugin> the first stacks, dump writes the report to
+debug/, reset clears it. Entries are only added on paths that throw or
+already walk the stack, so calls that pass cost nothing.
+
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+index bbfd65e76fa88760bb1cd09901ba61faaeacfee0..0b074171753a0581c9cfa592012e410586f87dda 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+@@ -50,6 +50,7 @@ public class TickThread extends Thread {
+     public static void ensureTickThread(final String reason) {
+         if (!isTickThread()) {
+             LOGGER.error("Thread failed main thread check: " + reason + ", context=" + getThreadContext(), new Throwable());
++            io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(reason); // Tessera - compatibility report
+             throw new IllegalStateException(reason);
+         }
+     }
+@@ -59,6 +60,7 @@ public class TickThread extends Thread {
+             final String ex = "Thread failed main thread check: " +
+                                reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos;
+             LOGGER.error(ex, new Throwable());
++            io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -68,6 +70,7 @@ public class TickThread extends Thread {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos + ", block_radius=" + blockRadius;
+             LOGGER.error(ex, new Throwable());
++            io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -77,6 +80,7 @@ public class TickThread extends Thread {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + pos;
+             LOGGER.error(ex, new Throwable());
++            io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -86,6 +90,7 @@ public class TickThread extends Thread {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + new ChunkPos(chunkX, chunkZ);
+             LOGGER.error(ex, new Throwable());
++            io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -95,6 +100,7 @@ public class TickThread extends Thread {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", entity=" + EntityUtil.dumpEntity(entity);
+             LOGGER.error(ex, new Throwable());
++            io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -104,6 +110,7 @@ public class TickThread extends Thread {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", aabb=" + aabb;
+             LOGGER.error(ex, new Throwable());
++            io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+     }
+@@ -113,6 +120,7 @@ public class TickThread extends Thread {
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + new Vec3(blockX, 0.0, blockZ);
+             LOGGER.error(ex, new Throwable());
++            io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+     }
+diff --git a/src/main/java/io/papermc/paper/command/PaperCommands.java b/src/main/java/io/papermc/paper/command/PaperCommands.java
+index 6216147f4d4c04ba616375430a91232d5ebe838a..185812af9d0c7072632b44696ddc58bb214b22b4 100644
+--- a/src/main/java/io/papermc/paper/command/PaperCommands.java
++++ b/src/main/java/io/papermc/paper/command/PaperCommands.java
+@@ -25,6 +25,7 @@ public final class PaperCommands {
+         COMMANDS.put("paper", new PaperCommand("paper"));
+         COMMANDS.put("tps", new io.papermc.paper.threadedregions.commands.CommandServerHealth()); // Folia - region threading
+         COMMANDS.put("profiler", new io.papermc.paper.threadedregions.commands.CommandProfiler()); // Folia - region threading - profiler
++        COMMANDS.put("tessera", new TesseraCommand()); // Tessera - compatibility report
+ 
+         COMMANDS.forEach((s, command) -> {
+             server.server.getCommandMap().register(s, "Paper", command);
+diff --git a/src/main/java/io/papermc/paper/command/TesseraCommand.java b/src/main/java/io/papermc/paper/command/TesseraCommand.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..da2058db9f415f7ea6d3e16415b2f0a617922d60
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/command/TesseraCommand.java
+@@ -0,0 +1,160 @@
++package io.papermc.paper.command;
++
++import io.papermc.paper.threadedregions.TesseraCompatReport;
++import java.io.IOException;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.time.Instant;
++import java.time.ZoneId;
++import java.time.format.DateTimeFormatter;
++import java.util.ArrayList;
++import java.util.LinkedHashMap;
++import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++import net.kyori.adventure.text.Component;
++import net.kyori.adventure.text.format.NamedTextColor;
++import org.bukkit.command.Command;
++import org.bukkit.command.CommandSender;
++import org.checkerframework.checker.nullness.qual.NonNull;
++import org.checkerframework.framework.qual.DefaultQualifier;
++
++/**
++ * {@code /tessera compat}: what plugins in compatibility mode do that Folia does not allow.
++ */
++@DefaultQualifier(NonNull.class)
++public final class TesseraCommand extends Command {
++
++    private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
++    private static final DateTimeFormatter FILE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss").withZone(ZoneId.systemDefault());
++    private static final int STACK_LINES = 12;
++
++    public TesseraCommand() {
++        super("tessera");
++        this.setUsage("/<command> compat [plugin|dump|reset]");
++        this.setDescription("Tessera tools: the compatibility mode report.");
++        this.setPermission("tessera.command.compat");
++    }
++
++    @Override
++    public boolean execute(final CommandSender sender, final String commandLabel, final String[] args) {
++        if (!this.testPermission(sender)) {
++            return true;
++        }
++        if (args.length < 1 || !args[0].equalsIgnoreCase("compat")) {
++            sender.sendMessage(Component.text("Usage: /" + commandLabel + " compat [plugin|dump|reset]", NamedTextColor.RED));
++            return true;
++        }
++        if (args.length < 2) {
++            this.summary(sender);
++        } else if (args[1].equalsIgnoreCase("reset")) {
++            TesseraCompatReport.reset();
++            sender.sendMessage(Component.text("Compatibility report cleared.", NamedTextColor.GREEN));
++        } else if (args[1].equalsIgnoreCase("dump")) {
++            this.dump(sender);
++        } else {
++            this.plugin(sender, args[1]);
++        }
++        return true;
++    }
++
++    private static Map<String, List<Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry>>> byPlugin() {
++        final Map<String, List<Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry>>> map = new LinkedHashMap<>();
++        for (final Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry> entry : TesseraCompatReport.entries()) {
++            map.computeIfAbsent(entry.getKey().plugin(), k -> new ArrayList<>()).add(entry);
++        }
++        return map;
++    }
++
++    private static String line(final TesseraCompatReport.Key key, final TesseraCompatReport.Entry entry) {
++        return key.kind().name().toLowerCase(Locale.ROOT) + " " + key.context().name().toLowerCase(Locale.ROOT)
++            + " " + key.method() + " x" + entry.count();
++    }
++
++    private static NamedTextColor colour(final TesseraCompatReport.Kind kind) {
++        return kind == TesseraCompatReport.Kind.FAILED ? NamedTextColor.RED : NamedTextColor.YELLOW;
++    }
++
++    private void summary(final CommandSender sender) {
++        final Map<String, List<Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry>>> plugins = byPlugin();
++        sender.sendMessage(Component.text("Compatibility report since " + TIME.format(TesseraCompatReport.since())
++            + ": " + plugins.size() + " plugin(s)", NamedTextColor.GOLD));
++        if (plugins.isEmpty()) {
++            sender.sendMessage(Component.text("Nothing recorded.", NamedTextColor.GRAY));
++            return;
++        }
++        plugins.forEach((plugin, entries) -> {
++            sender.sendMessage(Component.text(plugin, NamedTextColor.AQUA));
++            for (final Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry> entry : entries) {
++                sender.sendMessage(Component.text("  " + line(entry.getKey(), entry.getValue()), colour(entry.getKey().kind())));
++            }
++        });
++        sender.sendMessage(Component.text("/tessera compat <plugin> shows the first stack, /tessera compat dump writes everything to a file.", NamedTextColor.GRAY));
++    }
++
++    private void plugin(final CommandSender sender, final String name) {
++        final List<Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry>> entries = byPlugin().entrySet().stream()
++            .filter(e -> e.getKey().equalsIgnoreCase(name))
++            .findFirst().map(Map.Entry::getValue).orElse(List.of());
++        if (entries.isEmpty()) {
++            sender.sendMessage(Component.text("Nothing recorded for " + name + ".", NamedTextColor.GRAY));
++            return;
++        }
++        for (final Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry> entry : entries) {
++            final List<String> lines = new ArrayList<>();
++            describe(entry.getKey(), entry.getValue(), STACK_LINES, lines);
++            sender.sendMessage(Component.text(lines.getFirst(), colour(entry.getKey().kind())));
++            for (final String line : lines.subList(1, lines.size())) {
++                sender.sendMessage(Component.text(line, NamedTextColor.GRAY));
++            }
++        }
++    }
++
++    private static void describe(final TesseraCompatReport.Key key, final TesseraCompatReport.Entry entry, final int stackLines, final List<String> out) {
++        out.add(line(key, entry));
++        out.add("  first: " + TIME.format(entry.firstSeen()) + " on " + entry.thread());
++        if (entry.reason() != null) {
++            out.add("  reason: " + entry.reason());
++        }
++        final StackTraceElement[] stack = entry.stack();
++        for (int i = 0; i < Math.min(stack.length, stackLines); ++i) {
++            out.add("    at " + stack[i]);
++        }
++        if (stack.length > stackLines) {
++            out.add("    ... " + (stack.length - stackLines) + " more");
++        }
++    }
++
++    private void dump(final CommandSender sender) {
++        final List<String> lines = new ArrayList<>();
++        lines.add("Tessera compatibility report, " + TIME.format(TesseraCompatReport.since()) + " - " + TIME.format(Instant.now()));
++        byPlugin().forEach((plugin, entries) -> {
++            lines.add("");
++            lines.add("== " + plugin);
++            for (final Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry> entry : entries) {
++                describe(entry.getKey(), entry.getValue(), Integer.MAX_VALUE, lines);
++            }
++        });
++        final Path file = Path.of("debug", "tessera-compat-" + FILE_TIME.format(Instant.now()) + ".txt");
++        try {
++            Files.createDirectories(file.getParent());
++            Files.write(file, lines);
++            sender.sendMessage(Component.text("Compatibility report written to " + file, NamedTextColor.GREEN));
++        } catch (final IOException ex) {
++            sender.sendMessage(Component.text("Could not write " + file + ": " + ex.getMessage(), NamedTextColor.RED));
++        }
++    }
++
++    @Override
++    public List<String> tabComplete(final CommandSender sender, final String alias, final String[] args) {
++        if (args.length == 1) {
++            return io.papermc.paper.threadedregions.commands.CommandUtil.getSortedList(List.of("compat"), args[0]);
++        }
++        if (args.length == 2 && args[0].equalsIgnoreCase("compat")) {
++            final List<String> options = new ArrayList<>(List.of("dump", "reset"));
++            options.addAll(byPlugin().keySet());
++            return io.papermc.paper.threadedregions.commands.CommandUtil.getSortedList(options, args[1]);
++        }
++        return List.of();
++    }
++}
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index 46eef72899f8c5e8e33c5466f9aa8a1c06d6641c..a533fa64806a7f5c5ba61697ba550d1858ab4ad8 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -46,8 +46,6 @@ public final class TesseraCompat {
+           plugins: []
+         """;
+ 
+-    private static final StackWalker STACK_WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+-
+     private static volatile Set<String> plugins = Set.of();
+     private static volatile boolean allPlugins;
+ 
+@@ -170,19 +168,6 @@ public final class TesseraCompat {
+         return plugin != null && isCompat(plugin) ? plugin : null;
+     }
+ 
+-    /**
+-     * Returns whether code of a plugin in compatibility mode is on the call stack. Only for paths that would throw
+-     * otherwise, such as APIs Folia has no synchronous variant of: walking the stack is not free.
+-     */
+-    public static boolean calledByCompatPlugin() {
+-        if (!enabled()) {
+-            return false;
+-        }
+-        return STACK_WALKER.walk(frames -> frames.anyMatch(frame ->
+-            frame.getDeclaringClass().getClassLoader() instanceof ConfiguredPluginClassLoader loader
+-                && loader.getPlugin() != null && isCompat(loader.getPlugin())));
+-    }
+-
+     /**
+      * Runs a command of a plugin in compatibility mode on the global region thread, where it can borrow regions.
+      * From another thread (a player or a command block in a region), the command runs in the next global tick.
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompatReport.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompatReport.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..934f1e78bd65636e5fa8e93953a7392ad3325e83
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompatReport.java
+@@ -0,0 +1,189 @@
++package io.papermc.paper.threadedregions;
++
++import io.papermc.paper.plugin.provider.classloader.ConfiguredPluginClassLoader;
++import java.time.Instant;
++import java.util.ArrayList;
++import java.util.Comparator;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.atomic.LongAdder;
++import org.bukkit.plugin.Plugin;
++
++/**
++ * Counts what plugins in compatibility mode do that Folia does not allow: failed thread checks, and calls that
++ * Tessera handles in a different way than Paper (synchronous teleport, entities of the whole world). Each entry is
++ * a plugin, the API method it called and the thread it called it on, with the stack of the first call.
++ * <p>
++ * Nothing is counted on the paths that succeed anyway: entries are only added where the server would throw or has
++ * already walked the stack.
++ */
++public final class TesseraCompatReport {
++
++    public enum Kind {
++        /** A thread check failed and the call threw. */
++        FAILED,
++        /** A synchronous teleport, run through {@code teleportAsync} in the next tick of the entity. */
++        TELEPORT,
++        /** A list of the entities of a world, cut down to the region of the calling thread. */
++        REGION_ENTITIES
++    }
++
++    public enum Context {
++        GLOBAL, REGION, OTHER;
++
++        static Context current() {
++            if (RegionizedServer.isGlobalTickThread()) {
++                return GLOBAL;
++            }
++            return TickRegionScheduler.getCurrentRegion() != null ? REGION : OTHER;
++        }
++    }
++
++    public record Key(String plugin, Kind kind, Context context, String method) {
++    }
++
++    public static final class Entry {
++        private final LongAdder count = new LongAdder();
++        private final long firstSeen;
++        private final String thread;
++        private final String reason;
++        private final StackTraceElement[] stack;
++
++        private Entry(final String reason, final StackTraceElement[] stack) {
++            this.firstSeen = System.currentTimeMillis();
++            this.thread = Thread.currentThread().getName();
++            this.reason = reason;
++            this.stack = stack;
++        }
++
++        public long count() {
++            return this.count.sum();
++        }
++
++        public Instant firstSeen() {
++            return Instant.ofEpochMilli(this.firstSeen);
++        }
++
++        public String thread() {
++            return this.thread;
++        }
++
++        public String reason() {
++            return this.reason;
++        }
++
++        public StackTraceElement[] stack() {
++            return this.stack.clone();
++        }
++    }
++
++    private static final StackWalker STACK_WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
++    private static final int MAX_ENTRIES = 1024;
++    private static final int MAX_STACK = 64;
++
++    private static final Map<Key, Entry> ENTRIES = new ConcurrentHashMap<>();
++    private static volatile long since = System.currentTimeMillis();
++
++    private TesseraCompatReport() {
++    }
++
++    private record Caller(Plugin plugin, String method) {
++    }
++
++    /**
++     * Finds the first frame of a plugin in compatibility mode on the stack and the method it called.
++     */
++    private static Caller findCaller() {
++        return STACK_WALKER.walk(frames -> {
++            StackWalker.StackFrame callee = null;
++            for (final StackWalker.StackFrame frame : (Iterable<StackWalker.StackFrame>) frames::iterator) {
++                if (frame.getDeclaringClass().getClassLoader() instanceof ConfiguredPluginClassLoader loader
++                    && loader.getPlugin() != null && TesseraCompat.isCompat(loader.getPlugin())) {
++                    final String method = callee == null ? "?" : simpleName(callee.getClassName()) + "." + callee.getMethodName();
++                    return new Caller(loader.getPlugin(), method);
++                }
++                if (frame.getDeclaringClass() != TesseraCompatReport.class) {
++                    callee = frame;
++                }
++            }
++            return null;
++        });
++    }
++
++    private static String simpleName(final String className) {
++        return className.substring(className.lastIndexOf('.') + 1);
++    }
++
++    /**
++     * Records a failed thread check if a plugin in compatibility mode is on the stack. Called right before the
++     * check throws.
++     */
++    public static void threadCheckFailed(final String reason) {
++        if (!TesseraCompat.enabled()) {
++            return;
++        }
++        try {
++            final Caller caller = findCaller();
++            if (caller != null) {
++                add(caller, Kind.FAILED, reason);
++            }
++        } catch (final Throwable ignored) {
++            // the report must never replace the exception of the thread check
++        }
++    }
++
++    /**
++     * Returns whether code of a plugin in compatibility mode is on the stack, and if so, records the call.
++     */
++    public static boolean calledByCompatPlugin(final Kind kind) {
++        if (!TesseraCompat.enabled()) {
++            return false;
++        }
++        final Caller caller = findCaller();
++        if (caller == null) {
++            return false;
++        }
++        add(caller, kind, null);
++        return true;
++    }
++
++    private static void add(final Caller caller, final Kind kind, final String reason) {
++        final Key key = new Key(caller.plugin().getName(), kind, Context.current(), caller.method());
++        Entry entry = ENTRIES.get(key);
++        if (entry == null) {
++            if (ENTRIES.size() >= MAX_ENTRIES) {
++                return;
++            }
++            final StackTraceElement[] stack = captureStack();
++            entry = ENTRIES.computeIfAbsent(key, k -> new Entry(reason, stack));
++        }
++        entry.count.increment();
++    }
++
++    private static StackTraceElement[] captureStack() {
++        return STACK_WALKER.walk(frames -> frames
++            .dropWhile(frame -> frame.getDeclaringClass() == TesseraCompatReport.class)
++            .limit(MAX_STACK)
++            .map(StackWalker.StackFrame::toStackTraceElement)
++            .toArray(StackTraceElement[]::new));
++    }
++
++    /**
++     * Returns the entries, the most frequent first.
++     */
++    public static List<Map.Entry<Key, Entry>> entries() {
++        final List<Map.Entry<Key, Entry>> list = new ArrayList<>(ENTRIES.entrySet());
++        list.sort(Comparator.<Map.Entry<Key, Entry>>comparingLong(e -> e.getValue().count()).reversed());
++        return list;
++    }
++
++    public static Instant since() {
++        return Instant.ofEpochMilli(since);
++    }
++
++    public static void reset() {
++        ENTRIES.clear();
++        since = System.currentTimeMillis();
++    }
++}
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+index 563a8340eed0e697f1c12c3c1a89d40fb8e845ea..44c517dbc3b5084e464b832b536e3b999e9baa11 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -975,7 +975,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+         // Tessera start - plugins in compatibility mode only see the entities of their region on a region thread
+         final Iterable<net.minecraft.world.entity.Entity> all = this.getHandle().getEntities().getAll();
+         if (io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion() != null
+-            && io.papermc.paper.threadedregions.TesseraCompat.calledByCompatPlugin()) {
++            && io.papermc.paper.threadedregions.TesseraCompatReport.calledByCompatPlugin(io.papermc.paper.threadedregions.TesseraCompatReport.Kind.REGION_ENTITIES)) {
+             final List<net.minecraft.world.entity.Entity> owned = new ArrayList<>();
+             for (final net.minecraft.world.entity.Entity entity : all) {
+                 if (ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(entity)) {
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
+index bee0f336c3fa04a7953b9f591fe7136392511a0e..c1d4441f094f82c8184bee6a550533e101a00641 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftEntity.java
+@@ -325,7 +325,7 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
+ 
+     protected boolean teleport0(Location location, TeleportCause cause, TeleportFlag... flags) {
+         // Tessera start - plugins in compatibility mode teleport through teleportAsync
+-        if (io.papermc.paper.threadedregions.TesseraCompat.calledByCompatPlugin()) {
++        if (io.papermc.paper.threadedregions.TesseraCompatReport.calledByCompatPlugin(io.papermc.paper.threadedregions.TesseraCompatReport.Kind.TELEPORT)) {
+             return this.tesseraTeleportLater(location, cause, flags);
+         }
+         // Tessera end - plugins in compatibility mode teleport through teleportAsync
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index d44ce9bb92c4bf2696924c0b81d14ec37c1a3976..882f9a66e12b161e4f63e328ae686095ae907ed7 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -1343,7 +1343,7 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+     @Override
+     protected boolean teleport0(Location location, org.bukkit.event.player.PlayerTeleportEvent.TeleportCause cause, io.papermc.paper.entity.TeleportFlag... flags) {
+         // Tessera start - plugins in compatibility mode teleport through teleportAsync
+-        if (io.papermc.paper.threadedregions.TesseraCompat.calledByCompatPlugin()) {
++        if (io.papermc.paper.threadedregions.TesseraCompatReport.calledByCompatPlugin(io.papermc.paper.threadedregions.TesseraCompatReport.Kind.TELEPORT)) {
+             if (this.getHandle().connection == null) {
+                 return false;
+             }
+diff --git a/src/main/java/org/spigotmc/AsyncCatcher.java b/src/main/java/org/spigotmc/AsyncCatcher.java
+index 7e7a0ed944961af5ab7a49bc659da2862d2e2c82..82878897a5106ea4f6f30eaa34d3310a72477bfc 100644
+--- a/src/main/java/org/spigotmc/AsyncCatcher.java
++++ b/src/main/java/org/spigotmc/AsyncCatcher.java
+@@ -7,6 +7,7 @@ public class AsyncCatcher {
+     public static void catchOp(String reason) {
+         if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThread()) { // Paper - chunk system
+             MinecraftServer.LOGGER.error("Thread {} failed main thread check: {}", Thread.currentThread().getName(), reason, new Throwable()); // Paper
++            io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed("Asynchronous " + reason); // Tessera - compatibility report
+             throw new IllegalStateException("Asynchronous " + reason + "!");
+         }
+     }
