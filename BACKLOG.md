@@ -63,9 +63,6 @@
   Ещё проверить: `ServerLevel#getMapData` зовёт `MapInitializeEvent` внутри `ConcurrentHashMap.computeIfAbsent` —
   плагин, который в обработчике трогает другую карту (ImageFrame), может получить `Recursive update`.
 
-### T-024 Пакет recipe discovery невалиден — [#303](https://github.com/PaperMC/Folia/issues/303)
-- **Где.** `ServerRecipeBook`, `ClientboundRecipeBookAddPacket`. Проверить на 26.3, может быть уже неактуально.
-
 ### T-025 Жители неправильно определяют рабочее место — [#127](https://github.com/PaperMC/Folia/issues/127)
 - **Где.** `AssignProfessionFromJobSite`, `AcquirePoi`, `PoiManager` (смежно с уже сделанными патчами по AI и POI).
 
@@ -353,3 +350,4 @@
 | Лишние незер-порталы — не воспроизводится на 26.3: 6 и 30 предметов в новый портал в одном тике, два портала по 10 предметов в одну область незера и два игрока одновременно дают ровно один портал на той стороне (повторный поиск перед созданием, `existingTryAgain`), T-017 | #69 | — |
 | Плагин в режиме совместимости на потоке региона видит в `World#getEntities` / `getLivingEntities` / `getEntitiesByClass` только сущности своего региона (LevelledMobs в `PlayerTeleportEvent`), T-109 | — | paper 0026 |
 | Отклонённое до `PlayerInteractEntityEvent` взаимодействие с сущностью (цель в другом регионе, за границей мира, вне досягаемости, не найдена) переотправляет инвентарь игрока и экипировку цели: аллай больше не «забирает» предмет только на клиенте, T-022 | #502 | 0050 |
+| `recipe_book_add` не кодируется — не воспроизводится на 26.3, и это не Folia: в #303 падал компонент `minecraft:equippable` с `null` вместо `Optional` у предмета плагина (Paper 1.21.4). Сейчас `CraftEquippableComponent` собирает все `Optional` через `ofNullable`/`empty`; рецепты плагина (shaped и shapeless) с таким предметом в результате и ингредиенте отправляются через `/recipe give` без ошибок, T-024 | #303 | — |
