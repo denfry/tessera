@@ -1,0 +1,175 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 10:13:02 +0300
+Subject: [PATCH] Keep the velocity on async teleports with relative velocity
+ flags
+
+teleportAsync always replaced the velocity of the entity and its
+passengers. Add TELEPORT_FLAG_RELATIVE_VELOCITY_X/Y/Z and
+TELEPORT_FLAG_ROTATE_VELOCITY: with them the current velocity is kept
+(and rotated) per entity the same way Relative.DELTA_* and ROTATE_DELTA
+do on a sync teleport. Players get the flags as relatives in the
+position packet so the client keeps its own velocity, like on Paper.
+A teleport event listener that changes the destination drops the flags,
+as on Paper.
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 1f3d02f4956b32065a1c638f75de2d3fbf5ea5aa..56621e509a6ec542f918ab0c57b37128d1332fc5 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -1892,7 +1892,7 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     }
+ 
+     @Override
+-    protected void teleportSyncSameRegion(Vec3 pos, Float yaw, Float pitch, Vec3 velocity) {
++    protected void teleportSyncSameRegion(Vec3 pos, Float yaw, Float pitch, Vec3 velocity, long teleportFlags) { // Tessera - relative velocity on async teleport
+         if (yaw != null) {
+             this.setYRot(yaw.floatValue());
+             this.setYHeadRot(yaw.floatValue());
+@@ -1903,12 +1903,15 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+         if (velocity != null) {
+             this.setDeltaMovement(velocity);
+         }
++        // Tessera start - relative velocity on async teleport - the client keeps its own velocity, like on Paper
++        java.util.Set<net.minecraft.world.entity.Relative> velocityRelatives = Entity.velocityRelatives(teleportFlags);
+         this.connection.internalTeleport(
+             new net.minecraft.world.entity.PositionMoveRotation(
+-                pos, this.getDeltaMovement(), this.getYRot(), this.getXRot()
++                pos, velocityRelatives.isEmpty() ? this.getDeltaMovement() : Vec3.ZERO, this.getYRot(), this.getXRot()
+             ),
+-            java.util.Collections.emptySet()
++            velocityRelatives
+         );
++        // Tessera end - relative velocity on async teleport
+         this.connection.resetPosition();
+         this.setOldPosAndRot();
+         this.resetStoredPositions();
+@@ -1943,12 +1946,15 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+ 
+             // required to set up the pending teleport stuff to the client, and to actually update
+             // the player's position clientside
++            // Tessera start - relative velocity on async teleport - the client keeps its own velocity, like on Paper
++            java.util.Set<net.minecraft.world.entity.Relative> velocityRelatives = Entity.velocityRelatives(teleportFlags);
+             this.connection.internalTeleport(
+                 new net.minecraft.world.entity.PositionMoveRotation(
+-                    this.position(), this.getDeltaMovement(), this.getYRot(), this.getXRot()
++                    this.position(), velocityRelatives.isEmpty() ? this.getDeltaMovement() : Vec3.ZERO, this.getYRot(), this.getXRot()
+                 ),
+-                java.util.Collections.emptySet()
++                velocityRelatives
+             );
++            // Tessera end - relative velocity on async teleport
+             this.connection.resetPosition();
+ 
+             this.postChangeDimension();
+@@ -2000,12 +2006,15 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+ 
+             // required to set up the pending teleport stuff to the client, and to actually update
+             // the player's position clientside
++            // Tessera start - relative velocity on async teleport - the client keeps its own velocity, like on Paper
++            java.util.Set<net.minecraft.world.entity.Relative> velocityRelatives = Entity.velocityRelatives(teleportFlags);
+             this.connection.internalTeleport(
+                 new net.minecraft.world.entity.PositionMoveRotation(
+-                    this.position(), this.getDeltaMovement(), this.getYRot(), this.getXRot()
++                    this.position(), velocityRelatives.isEmpty() ? this.getDeltaMovement() : Vec3.ZERO, this.getYRot(), this.getXRot()
+                 ),
+-                java.util.Collections.emptySet()
++                velocityRelatives
+             );
++            // Tessera end - relative velocity on async teleport
+             this.connection.resetPosition();
+             this.stopUsingItem();
+ 
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index cf3a2546f18c427b07dab2d4d76959a287314cc6..29fe368b26a8fceb9af594ff5644086840a9a8fa 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4408,6 +4408,53 @@ public abstract class Entity
+      * call, for callers that have already fired the event or perform an internal correction.
+      */
+     public static final long TELEPORT_FLAG_NO_EVENT = 1L << 3;
++    // Tessera end - teleport events
++    // Tessera start - relative velocity on async teleport
++    /**
++     * These flags keep the matching part of the current velocity, like {@link Relative#DELTA_X},
++     * {@link Relative#DELTA_Y}, {@link Relative#DELTA_Z} and {@link Relative#ROTATE_DELTA} on a sync teleport.
++     * The velocity passed to teleportAsync is then added to the kept part.
++     */
++    public static final long TELEPORT_FLAG_RELATIVE_VELOCITY_X = 1L << 4;
++    public static final long TELEPORT_FLAG_RELATIVE_VELOCITY_Y = 1L << 5;
++    public static final long TELEPORT_FLAG_RELATIVE_VELOCITY_Z = 1L << 6;
++    public static final long TELEPORT_FLAG_ROTATE_VELOCITY = 1L << 7;
++    public static final long TELEPORT_FLAG_RELATIVE_VELOCITY = TELEPORT_FLAG_RELATIVE_VELOCITY_X | TELEPORT_FLAG_RELATIVE_VELOCITY_Y
++        | TELEPORT_FLAG_RELATIVE_VELOCITY_Z | TELEPORT_FLAG_ROTATE_VELOCITY;
++
++    public static java.util.Set<Relative> velocityRelatives(final long teleportFlags) {
++        final java.util.Set<Relative> ret = java.util.EnumSet.noneOf(Relative.class);
++        if ((teleportFlags & TELEPORT_FLAG_RELATIVE_VELOCITY_X) != 0L) ret.add(Relative.DELTA_X);
++        if ((teleportFlags & TELEPORT_FLAG_RELATIVE_VELOCITY_Y) != 0L) ret.add(Relative.DELTA_Y);
++        if ((teleportFlags & TELEPORT_FLAG_RELATIVE_VELOCITY_Z) != 0L) ret.add(Relative.DELTA_Z);
++        if ((teleportFlags & TELEPORT_FLAG_ROTATE_VELOCITY) != 0L) ret.add(Relative.ROTATE_DELTA);
++        return ret;
++    }
++
++    public static long velocityTeleportFlags(final java.util.Set<Relative> relatives) {
++        long ret = 0L;
++        if (relatives.contains(Relative.DELTA_X)) ret |= TELEPORT_FLAG_RELATIVE_VELOCITY_X;
++        if (relatives.contains(Relative.DELTA_Y)) ret |= TELEPORT_FLAG_RELATIVE_VELOCITY_Y;
++        if (relatives.contains(Relative.DELTA_Z)) ret |= TELEPORT_FLAG_RELATIVE_VELOCITY_Z;
++        if (relatives.contains(Relative.ROTATE_DELTA)) ret |= TELEPORT_FLAG_ROTATE_VELOCITY;
++        return ret;
++    }
++
++    protected final Vec3 teleportVelocity(final Vec3 velocity, final Float yaw, final Float pitch, final long teleportFlags) {
++        if ((teleportFlags & TELEPORT_FLAG_RELATIVE_VELOCITY) == 0L) {
++            return velocity;
++        }
++        return PositionMoveRotation.calculateAbsolute(
++            PositionMoveRotation.of(this),
++            new PositionMoveRotation(
++                this.position(), velocity == null ? Vec3.ZERO : velocity,
++                yaw == null ? this.getYRot() : yaw.floatValue(), pitch == null ? this.getXRot() : pitch.floatValue()
++            ),
++            velocityRelatives(teleportFlags)
++        ).deltaMovement();
++    }
++    // Tessera end - relative velocity on async teleport
++    // Tessera start - teleport events
+ 
+     private static final org.bukkit.Location TELEPORT_EVENT_UNCHANGED = new org.bukkit.Location(null, 0.0, 0.0, 0.0);
+ 
+@@ -4547,7 +4594,7 @@ public abstract class Entity
+         this.movementThisTick.clear();
+     }
+ 
+-    protected void teleportSyncSameRegion(Vec3 pos, Float yaw, Float pitch, Vec3 velocity) {
++    protected void teleportSyncSameRegion(Vec3 pos, Float yaw, Float pitch, Vec3 velocity, long teleportFlags) { // Tessera - relative velocity on async teleport
+         if (yaw != null) {
+             this.setYRot(yaw.floatValue());
+             this.setYHeadRot(yaw.floatValue());
+@@ -4674,6 +4721,7 @@ public abstract class Entity
+                 yaw = Float.valueOf(newTo.getYaw());
+                 pitch = Float.valueOf(newTo.getPitch());
+                 velocity = Vec3.ZERO;
++                teleportFlags &= ~TELEPORT_FLAG_RELATIVE_VELOCITY; // Tessera - relative velocity on async teleport - like Paper, a changed destination resets the velocity
+                 if (destination.tesseraUnloading || !ServerLevel.isInSpawnableBounds(BlockPos.containing(pos))) {
+                     return false;
+                 }
+@@ -4701,7 +4749,7 @@ public abstract class Entity
+             }
+ 
+             for (EntityTreeNode entity : passengerTree.getFullTree()) {
+-                entity.root.teleportSyncSameRegion(pos, yaw, pitch, velocity);
++                entity.root.teleportSyncSameRegion(pos, yaw, pitch, entity.root.teleportVelocity(velocity, yaw, pitch, teleportFlags), teleportFlags); // Tessera - relative velocity on async teleport
+             }
+ 
+             if (hasPassengers) {
+@@ -4731,7 +4779,7 @@ public abstract class Entity
+         }
+ 
+         for (EntityTreeNode node : fullPassengerTree) {
+-            node.root = node.root.transformForAsyncTeleport(destination, pos, yaw, pitch, velocity);
++            node.root = node.root.transformForAsyncTeleport(destination, pos, yaw, pitch, node.root.teleportVelocity(velocity, yaw, pitch, teleportFlags)); // Tessera - relative velocity on async teleport
+         }
+ 
+         passengerTree.root.placeInAsync(originWorld, destination, teleportFlags, passengerTree, teleportComplete);
