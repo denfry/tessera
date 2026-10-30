@@ -1,0 +1,189 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:18:48 +0300
+Subject: [PATCH] Show the region in pretty console lines
+
+A Log4j context data provider records the region a log event comes from on the logging thread, so it survives the async appender: 'world 12,-4' (world and center chunk) on a region thread, 'global' on the global tick thread and 'global > world 12,-4' while the global thread holds a borrowed region. The pretty console style prints it as a gray tag; the log file format does not change. The context maps are cached per region and refreshed every 30 seconds, so a log call allocates nothing for it (about 15 ns per event).
+
+diff --git a/src/log4jPlugins/java/io/papermc/paper/console/TesseraStyleConverter.java b/src/log4jPlugins/java/io/papermc/paper/console/TesseraStyleConverter.java
+index cbc7d1e9fd4558329881a26f4b7429f768f2d19e..86ea6ddd3a6974d3c22421624f82b3256bc680ff 100644
+--- a/src/log4jPlugins/java/io/papermc/paper/console/TesseraStyleConverter.java
++++ b/src/log4jPlugins/java/io/papermc/paper/console/TesseraStyleConverter.java
+@@ -16,7 +16,7 @@ import org.apache.logging.log4j.core.pattern.PatternParser;
+ // Tessera start - pretty console colors
+ /**
+  * {@code %tesseraStyle{pattern}{role}} colors the formatted pattern for the {@code pretty} console style. Roles:
+- * {@code time} (gray), {@code level} (by the event level) and {@code logger} (a stable color per logger name).
++ * {@code time} and {@code dim} (gray), {@code level} (by the event level) and {@code logger} (a stable color per logger name).
+  * Uses the 16 basic ANSI colors, which panels and the Windows console render, and emits nothing extra when
+  * {@link TerminalConsoleAppender#isAnsiSupported()} is false ({@code terminal.ansi}, {@code NO_COLOR}).
+  */
+@@ -31,7 +31,7 @@ public final class TesseraStyleConverter extends LogEventPatternConverter {
+         "[36m", "[96m", "[35m", "[95m", "[94m", "[32m", "[92m", "[33m"
+     };
+ 
+-    private enum Role { TIME, LEVEL, LOGGER }
++    private enum Role { TIME, DIM, LEVEL, LOGGER }
+ 
+     private final List<PatternFormatter> formatters;
+     private final Role role;
+@@ -52,7 +52,7 @@ public final class TesseraStyleConverter extends LogEventPatternConverter {
+             return;
+         }
+         final String color = switch (this.role) {
+-            case TIME -> GRAY;
++            case TIME, DIM -> GRAY;
+             case LEVEL -> levelColor(event.getLevel());
+             case LOGGER -> loggerColor(toAppendTo, start);
+         };
+@@ -86,7 +86,7 @@ public final class TesseraStyleConverter extends LogEventPatternConverter {
+         try {
+             role = Role.valueOf(options[1].trim().toUpperCase(java.util.Locale.ROOT));
+         } catch (final IllegalArgumentException ex) {
+-            LOGGER.error("Unknown tesseraStyle role '" + options[1] + "', expected time, level or logger");
++            LOGGER.error("Unknown tesseraStyle role '" + options[1] + "', expected time, dim, level or logger");
+             return null;
+         }
+         final PatternParser parser = PatternLayout.createPatternParser(config);
+diff --git a/src/main/java/io/papermc/paper/log/TesseraRegionLogContext.java b/src/main/java/io/papermc/paper/log/TesseraRegionLogContext.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..6fb7bb5a2044b2fe015807ea42b9a7ce1008f021
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/log/TesseraRegionLogContext.java
+@@ -0,0 +1,111 @@
++package io.papermc.paper.log;
++
++import ca.spottedleaf.moonrise.common.util.CoordinateUtils;
++import ca.spottedleaf.moonrise.common.util.TickThread;
++import io.papermc.paper.threadedregions.RegionizedServer;
++import io.papermc.paper.threadedregions.ThreadedRegionizer;
++import io.papermc.paper.threadedregions.TickRegionScheduler;
++import io.papermc.paper.threadedregions.TickRegions;
++import it.unimi.dsi.fastutil.longs.LongIterator;
++import java.util.Arrays;
++import java.util.Collections;
++import java.util.HashMap;
++import java.util.Map;
++import java.util.WeakHashMap;
++import org.apache.logging.log4j.core.util.ContextDataProvider;
++
++// Tessera start - region in log lines
++/**
++ * Adds the region a log event comes from to its context data. Log4j calls this on the logging thread when the event
++ * is created, so the region survives the {@code Async} appender. Registered through
++ * {@code META-INF/services/org.apache.logging.log4j.core.util.ContextDataProvider}.
++ * <p>
++ * {@value #REGION} is {@code "world 12,-4"} (world and center chunk) on a region thread, {@code "global"} on the
++ * global tick thread, and {@code "global > world 12,-4"} when the global thread holds a borrowed region. Other
++ * threads get nothing.
++ */
++public final class TesseraRegionLogContext implements ContextDataProvider {
++
++    public static final String REGION = "tessera.region";
++    public static final String WORLD = "tessera.region.world";
++    public static final String CHUNK_X = "tessera.region.chunk_x";
++    public static final String CHUNK_Z = "tessera.region.chunk_z";
++    public static final String GLOBAL = "tessera.global";
++
++    private static final long REFRESH_TICKS = 30L * 20L;
++    private static final Map<String, String> GLOBAL_ONLY = Map.of(REGION, "global", GLOBAL, "true");
++    private static final Map<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>, Entry> CACHE =
++        Collections.synchronizedMap(new WeakHashMap<>());
++
++    // context maps are built once per region and refreshed every REFRESH_TICKS, so logging allocates nothing here
++    private record Entry(long tick, boolean hasCenter, Map<String, String> region, Map<String, String> borrowed) {}
++
++    @Override
++    public Map<String, String> supplyContextData() {
++        if (!(Thread.currentThread() instanceof TickThread)) {
++            return Map.of();
++        }
++        final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region = TickRegionScheduler.getCurrentRegion();
++        // the global tick thread may run with a borrowed region (plugin compat), so a region alone does not mean a region thread
++        final boolean global = TickRegionScheduler.getCurrentTickingTask() != null && RegionizedServer.isGlobalTickThread();
++        if (region == null) {
++            return global ? GLOBAL_ONLY : Map.of();
++        }
++        // only the thread ticking the region may walk its sections without the regioniser lock
++        final boolean owner = !global && TickRegionScheduler.getCurrentTickingTask() != null;
++        final long tick = region.getData().getCurrentTick();
++        Entry entry = CACHE.get(region);
++        if (entry == null || (owner && (!entry.hasCenter || tick - entry.tick >= REFRESH_TICKS))) {
++            entry = build(region, owner, tick);
++            CACHE.put(region, entry);
++        }
++        return global ? entry.borrowed : entry.region;
++    }
++
++    private static Entry build(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region,
++                               final boolean owner, final long tick) {
++        final String world = region.getData().world.getWorld().getName();
++        final long center = owner ? centerChunk(region) : Long.MIN_VALUE;
++        final Map<String, String> data = new HashMap<>(4);
++        data.put(WORLD, world);
++        String label = world;
++        if (center != Long.MIN_VALUE) {
++            final int x = CoordinateUtils.getChunkX(center);
++            final int z = CoordinateUtils.getChunkZ(center);
++            data.put(CHUNK_X, Integer.toString(x));
++            data.put(CHUNK_Z, Integer.toString(z));
++            label = world + " " + x + "," + z;
++        }
++        final Map<String, String> borrowed = new HashMap<>(data);
++        data.put(REGION, label);
++        borrowed.put(REGION, "global > " + label);
++        borrowed.put(GLOBAL, "true");
++        return new Entry(tick, center != Long.MIN_VALUE, Map.copyOf(data), Map.copyOf(borrowed));
++    }
++
++    // median section by x and by z, then the middle chunk of that section
++    private static long centerChunk(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
++        int[] xs = new int[16];
++        int[] zs = new int[16];
++        int size = 0;
++        for (final LongIterator it = region.getOwnedSectionsUnsynchronised(); it.hasNext();) {
++            final long key = it.nextLong();
++            if (size == xs.length) {
++                xs = Arrays.copyOf(xs, size << 1);
++                zs = Arrays.copyOf(zs, size << 1);
++            }
++            xs[size] = CoordinateUtils.getChunkX(key);
++            zs[size] = CoordinateUtils.getChunkZ(key);
++            ++size;
++        }
++        if (size == 0) {
++            return Long.MIN_VALUE;
++        }
++        Arrays.sort(xs, 0, size);
++        Arrays.sort(zs, 0, size);
++        final int shift = region.regioniser.sectionChunkShift;
++        final int half = (1 << shift) >> 1;
++        return CoordinateUtils.getChunkKey((xs[size >> 1] << shift) + half, (zs[size >> 1] << shift) + half);
++    }
++}
++// Tessera end - region in log lines
+diff --git a/src/main/resources/META-INF/services/org.apache.logging.log4j.core.util.ContextDataProvider b/src/main/resources/META-INF/services/org.apache.logging.log4j.core.util.ContextDataProvider
+new file mode 100644
+index 0000000000000000000000000000000000000000..ea4f2e9b0daf50d80ce2fef1bc1c65561ec2e1fe
+--- /dev/null
++++ b/src/main/resources/META-INF/services/org.apache.logging.log4j.core.util.ContextDataProvider
+@@ -0,0 +1 @@
++io.papermc.paper.log.TesseraRegionLogContext
+diff --git a/src/main/resources/log4j2.xml b/src/main/resources/log4j2.xml
+index e4dfc0e09ed6b7f85350969572966e9254dde8eb..33dae180b948bf3b6f5bf1da4b02376a3179137c 100644
+--- a/src/main/resources/log4j2.xml
++++ b/src/main/resources/log4j2.xml
+@@ -21,11 +21,11 @@
+             <DefaultArbiter>
+                 <TerminalConsole name="TerminalConsole">
+                     <PatternLayout>
+-                        <LoggerNamePatternSelector defaultPattern="%tesseraStyle{%d{HH:mm:ss}}{time} %tesseraStyle{%-5level}{level} %tesseraStyle{[%logger]}{logger} %highlightError{%msg%n%xEx{full}}">
++                        <LoggerNamePatternSelector defaultPattern="%tesseraStyle{%d{HH:mm:ss}}{time} %tesseraStyle{%-5level}{level} %tesseraStyle{%notEmpty{[%X{tessera.region}] }}{dim}%tesseraStyle{[%logger]}{logger} %highlightError{%msg%n%xEx{full}}">
+                             <!-- Log root, Minecraft, Mojang and Bukkit loggers without prefix -->
+                             <!-- Disable prefix for various plugins that bypass the plugin logger -->
+                             <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
+-                                          pattern="%tesseraStyle{%d{HH:mm:ss}}{time} %tesseraStyle{%-5level}{level} %highlightError{%msg%n%xEx{full}}" />
++                                          pattern="%tesseraStyle{%d{HH:mm:ss}}{time} %tesseraStyle{%-5level}{level} %tesseraStyle{%notEmpty{[%X{tessera.region}] }}{dim}%highlightError{%msg%n%xEx{full}}" />
+                         </LoggerNamePatternSelector>
+                     </PatternLayout>
+                 </TerminalConsole>

@@ -230,7 +230,7 @@
 - В профиле Leaf были пики раз в минуту. Проверить, что автосохранение на Tessera размазано по тикам: `max-per-tick` для игроков,
   чанков и карт.
 
-### Логи в консоли: T-052–T-054
+### Логи в консоли: T-053–T-054
 Общая цель: консоль, которую удобно читать в веб-панелях (Pterodactyl и т.п.) и в Windows-консоли, плюс JSON для Loki/ELK.
 Пример строки по умолчанию:
 ```
@@ -243,18 +243,6 @@
 ```
 Стиль выбирается `-Dtessera.log.style` / `TESSERA_LOG_STYLE` (T-050, `TesseraLogStyle` + `Select` в `log4j2.xml`). Формат `latest.log` по умолчанию
 не меняется: на него завязаны чужие парсеры.
-
-#### T-052 Регион в строке лога
-- **Что.** Сообщение с потока региона помечается `[мир x,z]` — центральный чанк региона, как в `/tps`. С глобального потока —
-  `[global]`, с остальных — ничего.
-- **Как.** Логирование идёт через `Async`-аппендер, поэтому регион надо брать при создании события, а не при форматировании: свой
-  `ContextDataInjector` (`log4j2.contextDataInjector`) кладёт в context data `tessera.region` из
-  `TickRegionScheduler.getCurrentRegion()`. Строку кешировать на регионе и сбрасывать при слиянии и разделении.
-  Глобальный поток определять по самому потоку, а не по `region == null`: в compat-режиме (ветка `feat/plugin-compat`,
-  `TesseraRegionLoan`) глобальный поток на время задачи плагина берёт регион взаймы, и `getCurrentRegion()` его возвращает.
-  Такую строку помечать `[global → мир x,z]`. Если понадобится менять `TickRegionScheduler`, сначала согласовать с веткой compat.
-- **Готово, когда.** Предупреждения из тика региона в консоли и JSON показывают регион; накладные расходы на событие — без
-  аллокаций в горячем пути (замерить JMH или 100k логов).
 
 #### T-053 Короткие стектрейсы
 - **Что.** В `pretty` из `%xEx` убирать кадры `io.netty`, `jdk.internal.reflect`, `java.lang.reflect`, `org.apache.logging` и
@@ -269,7 +257,7 @@
   пишет `logs/latest.json` с той же ротацией, что и `latest.log`. Формат — ECS через `log4j-layout-template-json` (проверить,
   есть ли модуль в зависимостях Paper; если нет — добавить).
 - **Поля.** `@timestamp`, `log.level`, `log.logger`, `message` без `§` и ANSI, `process.thread.name`, `tessera.plugin`,
-  `tessera.region.world` / `chunk_x` / `chunk_z` (из T-052), `error.type` / `error.message` / `error.stack_trace`.
+  `tessera.region.world` / `tessera.region.chunk_x` / `tessera.region.chunk_z`, `tessera.global` (context data из T-052), `error.type` / `error.message` / `error.stack_trace`.
 - **Готово, когда.** Логи читаются `jq` без ошибок, промтейл/Filebeat разбирает поля без своих regex. Описать в README.
 
 ---
@@ -321,4 +309,5 @@
 | Встроенный spark под регионы: профиль потоков регионов, TPS самого медленного региона, T-037 | #299 | paper 0013 |
 | Выбор стиля логов в консоли (`pretty` / `classic`), T-050 | — | paper 0014 |
 | Цвета `pretty`: уровень, тег плагина, `NO_COLOR` / `FORCE_COLOR`, Pterodactyl, T-051 | — | paper 0015 |
+| Регион в строке лога `pretty` (`[world x,z]`, `[global]`, `[global > world x,z]` для взятого взаймы), T-052 | — | paper 0016 |
 | При `max-players=N` заходят ровно N игроков (раньше N−1), T-036 | — | 0030 |
