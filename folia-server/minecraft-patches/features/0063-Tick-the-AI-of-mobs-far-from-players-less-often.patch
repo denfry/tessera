@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 14:40:02 +0300
+Subject: [PATCH] Tick the AI of mobs far from players less often
+
+Choosing goals, running sensors and starting behaviours is the expensive part of a mob's tick, and it matters little for mobs that no player is close to. With performance.distant-mob-ai in config/tessera.yml (default false) a mob further than distant-mob-ai-start-distance blocks from the nearest player does this every (distance * distance / 256) ticks, at most distant-mob-ai-max-interval. Running goals and behaviours, movement and memory timers still tick every tick, and mobs with a target or that were just hurt are not affected. The distance formula follows the DAB option of Pufferfish.
+
+diff --git a/io/papermc/paper/entity/activation/ActivationRange.java b/io/papermc/paper/entity/activation/ActivationRange.java
+index b4f9f41a56bbc40e90217c0344c070ebdd08c119..bba51d9113cb98cb8121c6ad73df68f2c6227ff9 100644
+--- a/io/papermc/paper/entity/activation/ActivationRange.java
++++ b/io/papermc/paper/entity/activation/ActivationRange.java
+@@ -174,6 +174,11 @@ public final class ActivationRange {
+                     continue;
+                 }
+ 
++                // Tessera start - tick the AI of mobs far from players less often
++                if (entity instanceof net.minecraft.world.entity.Mob mob) {
++                    mob.updateDistantAiInterval(player);
++                }
++                // Tessera end - tick the AI of mobs far from players less often
+                 ActivationRange.activateEntity(entity, bbByType); // Folia - threaded regions
+             }
+         }
+diff --git a/net/minecraft/world/entity/Mob.java b/net/minecraft/world/entity/Mob.java
+index dd5078c5d11e602588606eb3715e3a7d6a4f5487..2ccb04223b154dca90006fc57d56c21e209f47a7 100644
+--- a/net/minecraft/world/entity/Mob.java
++++ b/net/minecraft/world/entity/Mob.java
+@@ -234,6 +234,36 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+     }
+     // Paper end
+ 
++    // Tessera start - tick the AI of mobs far from players less often
++    private final boolean distantAiExcluded = io.papermc.paper.threadedregions.TesseraCompat.distantMobAi()
++        && io.papermc.paper.threadedregions.TesseraCompat.distantMobAiExcluded(EntityType.getKey(this.getType()).toString());
++    private int distantAiInterval = 1;
++    private long distantAiIntervalTick = Long.MIN_VALUE;
++
++    public final void updateDistantAiInterval(final Player player) {
++        if (!io.papermc.paper.threadedregions.TesseraCompat.distantMobAi() || this.distantAiExcluded) {
++            return;
++        }
++        final long tick = io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick();
++        final int interval = io.papermc.paper.threadedregions.TesseraCompat.distantMobAiInterval(this.distanceToSqr(player));
++        this.distantAiInterval = this.distantAiIntervalTick == tick ? Math.min(this.distantAiInterval, interval) : interval;
++        this.distantAiIntervalTick = tick;
++    }
++
++    private int distantAiInterval() {
++        if (this.distantAiInterval <= 1
++            || this.distantAiIntervalTick != io.papermc.paper.threadedregions.RegionizedServer.getCurrentTick()
++            || this.hurtTime > 0 || this.getTarget() != null) {
++            return 1;
++        }
++        return this.distantAiInterval;
++    }
++
++    public final boolean runsDistantAiThisTick() {
++        return (this.tickCount + this.getId()) % this.distantAiInterval() == 0;
++    }
++    // Tessera end - tick the AI of mobs far from players less often
++
+     public MoveControl getMoveControl() {
+         return this.getControlledVehicle() instanceof Mob riding ? riding.getMoveControl() : this.moveControl;
+     }
+@@ -848,7 +878,7 @@ public abstract class Mob extends LivingEntity implements Targeting, EquipmentUs
+         this.sensing.tick();
+         profiler.pop();
+         int idBasedTickCount = this.tickCount + this.getId();
+-        if (idBasedTickCount % 2 != 0 && this.tickCount > 1) {
++        if (idBasedTickCount % (2 * this.distantAiInterval()) != 0 && this.tickCount > 1) { // Tessera - choose goals less often far from players
+             profiler.push("targetSelector");
+             this.targetSelector.tickRunningGoals(false);
+             profiler.pop();
+diff --git a/net/minecraft/world/entity/ai/Brain.java b/net/minecraft/world/entity/ai/Brain.java
+index e097bc1268b4050e3948413c52dea69950858458..42f1a86d1daf3c2051a6f094c799f874dce8813b 100644
+--- a/net/minecraft/world/entity/ai/Brain.java
++++ b/net/minecraft/world/entity/ai/Brain.java
+@@ -384,8 +384,12 @@ public class Brain<E extends LivingEntity> {
+ 
+     public void tick(final ServerLevel level, final E body) {
+         this.forgetOutdatedMemories();
++        // Tessera start - sensors and new behaviours of mobs far from players run less often
++        if (!(body instanceof net.minecraft.world.entity.Mob mob) || mob.runsDistantAiThisTick()) {
+         this.tickSensors(level, body);
+         this.startEachNonRunningBehavior(level, body);
++        }
++        // Tessera end - sensors and new behaviours of mobs far from players run less often
+         this.tickEachRunningBehavior(level, body);
+     }
+ 

@@ -84,9 +84,6 @@ Rest of the item about minor races (the rest is in "Done").
 ### T-042 Asynchronous pathfinding
 - Compute `PathNavigation` / `PathFinder` off the region thread from a block snapshot, apply the result in the tick.
 
-### T-043 DAB: tick AI of distant mobs less often
-- `Mob#serverAiStep` and `Brain#tick` frequency depends on distance to the nearest player. Config option, off by default.
-
 ### T-044 Region size settings
 - Expose `grid-exponent` and the region merge radius in the Folia/Tessera config, document the impact.
 
@@ -290,3 +287,4 @@ Folia regions are already isolated, the next step is spreading them across proce
 | Lock contention: no hot monitor found, no patch. JFR with thresholds of 1 ms, 50 idle bots in about 40 regions, 6 region threads, 2 minutes: 0.07 s in monitors on region threads, 2.7 s in `ThreadedTicketLevelPropagator.await`, 0.4 s in `ThreadedRegionizer` and the rest is the scheduler waiting for work. Not covered: bots do not build or fight and no plugins were loaded, so re-check on a live profile, T-032 | #291 | — |
 | Compatibility-mode plugins can use the world in `onEnable`: the startup thread counts as the global tick and borrows regions until `RegionizedServer#init`. Multiverse-Core 5.8.2 loads its config and worlds, `mv tp` to the default and a second world works after a restart, T-108 | — | 0060 / paper 0031 |
 | Light tick behind `performance.light-entities` (default `false`): marker and gravity-less armor stands run a full tick once a second, or every tick while burning, riding, carrying a passenger, in a portal or under an effect; viewers of these stands and of display entities are recomputed every `light-entity-tracker-interval` ticks (default 5). Display entities have no server physics to skip. 2000 entities near one bot, region MSPT off/on: marker 9.2/4.0, gravity-less stand 7.0/3.9, display about 3.9/3.5 (within noise), regular stand unchanged. Fire damage, effect expiry and viewer removal after a teleport match with the option off. Not tested: a real client (late appearance is at most interval - 1 ticks), equipment updates reaching a viewer, several viewers, portals, T-040 | — | 0061 / paper 0032 |
+| Distant mob AI behind `performance.distant-mob-ai` (default `false`): mobs further than `distant-mob-ai-start-distance` (12) blocks from the nearest player choose goals, run sensors and start behaviours every distance²/256 ticks, at most `distant-mob-ai-max-interval` (20); `distant-mob-ai-exclude` lists entity types to skip. Running goals and behaviours, movement and memory timers tick every tick. With the default entity activation range the effect covers 12 to 32 blocks. 1000 cows and villagers 18 to 30 blocks from one bot, two alternating pairs of runs: median region MSPT 43.9 to 40.6 and 35.7 to 30.7, 8 to 14% lower, mobs moved as far, no errors. Target, hurt and exclude paths were not driven separately; farms and client behaviour were not checked, T-043 | — | 0063 / paper 0034 |

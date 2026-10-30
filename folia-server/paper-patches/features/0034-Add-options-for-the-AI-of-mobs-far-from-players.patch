@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 14:40:02 +0300
+Subject: [PATCH] Add options for the AI of mobs far from players
+
+Adds performance.distant-mob-ai, distant-mob-ai-start-distance, distant-mob-ai-max-interval and distant-mob-ai-exclude to config/tessera.yml. The default keeps vanilla behaviour.
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index 3a485016d309430e1618c197f8c785a1fed1b787..56b0c87d457f6bb98b0c613b34971f87f03e58ad 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -55,6 +55,16 @@ public final class TesseraCompat {
+           # disappear that much later.
+           light-entities: false
+           light-entity-tracker-interval: 5
++          # Mobs further than distant-mob-ai-start-distance blocks from the nearest player pick new goals and run
++          # sensors less often: every (distance * distance / 256) ticks, at most distant-mob-ai-max-interval.
++          # Running goals, movement and memory timers still tick every tick, and mobs with a target or that
++          # were just hurt are not affected. Distant farms react later. Mobs outside the entity activation range
++          # are throttled by it instead. distant-mob-ai-exclude lists entity types to leave alone, for example
++          # [villager, minecraft:piglin].
++          distant-mob-ai: false
++          distant-mob-ai-start-distance: 12
++          distant-mob-ai-max-interval: 20
++          distant-mob-ai-exclude: []
+         """;
+ 
+     private static volatile Set<String> plugins = Set.of();
+@@ -62,6 +72,10 @@ public final class TesseraCompat {
+     private static volatile boolean poiSearchesLoadChunks = true;
+     private static volatile boolean lightEntities;
+     private static volatile int lightEntityTrackerInterval = 1;
++    private static volatile boolean distantMobAi;
++    private static volatile double distantMobAiStartDistanceSquared = 144.0;
++    private static volatile int distantMobAiMaxInterval = 20;
++    private static volatile Set<String> distantMobAiExcluded = Set.of();
+ 
+     private TesseraCompat() {
+     }
+@@ -103,6 +117,25 @@ public final class TesseraCompat {
+             lightEntityTrackerInterval = !light ? 1
+                 : root instanceof Map<?, ?> rootMap && rootMap.get("performance") instanceof Map<?, ?> performance
+                     && performance.get("light-entity-tracker-interval") instanceof Number interval ? Math.max(1, interval.intValue()) : 5;
++            if (root instanceof Map<?, ?> rootMap && rootMap.get("performance") instanceof Map<?, ?> performance) {
++                if (performance.get("distant-mob-ai-start-distance") instanceof Number distance) {
++                    distantMobAiStartDistanceSquared = distance.doubleValue() * distance.doubleValue();
++                }
++                if (performance.get("distant-mob-ai-max-interval") instanceof Number interval) {
++                    distantMobAiMaxInterval = Math.max(1, interval.intValue());
++                }
++                final Set<String> excluded = new HashSet<>();
++                if (performance.get("distant-mob-ai-exclude") instanceof List<?> list) {
++                    for (final Object entry : list) {
++                        final String type = entry == null ? "" : entry.toString().trim().toLowerCase(Locale.ROOT);
++                        if (!type.isEmpty()) {
++                            excluded.add(type.indexOf(':') < 0 ? "minecraft:" + type : type);
++                        }
++                    }
++                }
++                distantMobAiExcluded = Set.copyOf(excluded);
++                distantMobAi = Boolean.TRUE.equals(performance.get("distant-mob-ai"));
++            }
+         } catch (final IOException | YAMLException ex) {
+             LOGGER.error("Could not read {}, compatibility mode is off", file, ex);
+         }
+@@ -123,6 +156,24 @@ public final class TesseraCompat {
+         return lightEntityTrackerInterval;
+     }
+ 
++    public static boolean distantMobAi() {
++        return distantMobAi;
++    }
++
++    public static boolean distantMobAiExcluded(final String entityType) {
++        return distantMobAiExcluded.contains(entityType);
++    }
++
++    /**
++     * Returns how many ticks apart a mob at this squared distance from a player runs its AI.
++     */
++    public static int distantMobAiInterval(final double distanceSquared) {
++        if (distanceSquared <= distantMobAiStartDistanceSquared) {
++            return 1;
++        }
++        return Math.max(1, Math.min((int)distanceSquared >> 8, distantMobAiMaxInterval));
++    }
++
+     /**
+      * Returns whether any plugin may run in compatibility mode.
+      */
