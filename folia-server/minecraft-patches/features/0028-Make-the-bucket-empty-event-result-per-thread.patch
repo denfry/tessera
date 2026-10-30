@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 08:09:51 +0300
+Subject: [PATCH] Make the bucket empty event result per thread
+
+Paper keeps the item stack set by PlayerBucketEmptyEvent in a static
+field until getEmptySuccessItem reads it back. With regions ticking in
+parallel, two players emptying buckets at the same time overwrite each
+other's value, so one of them can receive the item meant for the other
+or lose it. The value is written and read within one call on the same
+thread, so a ThreadLocal keeps the Paper behaviour.
+
+diff --git a/net/minecraft/world/item/BucketItem.java b/net/minecraft/world/item/BucketItem.java
+index 3bc24a581404fee042f9be29595ade92b7b29c0c..653b17d9a962ad89cb137b2474210a60551e2598 100644
+--- a/net/minecraft/world/item/BucketItem.java
++++ b/net/minecraft/world/item/BucketItem.java
+@@ -34,7 +34,7 @@ import net.minecraft.world.phys.HitResult;
+ import org.jspecify.annotations.Nullable;
+ 
+ public class BucketItem extends Item implements DispensibleContainerItem {
+-    private static @Nullable ItemStack itemLeftInHandAfterPlayerBucketEmptyEvent = null; // Paper - Fix PlayerBucketEmptyEvent result itemstack
++    private static final ThreadLocal<@Nullable ItemStack> itemLeftInHandAfterPlayerBucketEmptyEvent = new ThreadLocal<>(); // Paper - Fix PlayerBucketEmptyEvent result itemstack // Tessera - per thread, regions empty buckets concurrently
+     protected final Fluid content;
+ 
+     public BucketItem(final Fluid content, final Item.Properties properties) {
+@@ -111,9 +111,9 @@ public class BucketItem extends Item implements DispensibleContainerItem {
+ 
+     public static ItemStack getEmptySuccessItem(final ItemStack itemStack, final Player player) {
+         // Paper start - Fix PlayerBucketEmptyEvent result itemstack
+-        if (itemLeftInHandAfterPlayerBucketEmptyEvent != null) {
+-            ItemStack itemInHand = itemLeftInHandAfterPlayerBucketEmptyEvent;
+-            itemLeftInHandAfterPlayerBucketEmptyEvent = null;
++        final ItemStack itemInHand = itemLeftInHandAfterPlayerBucketEmptyEvent.get(); // Tessera - per thread
++        if (itemInHand != null) { // Tessera - per thread
++            itemLeftInHandAfterPlayerBucketEmptyEvent.remove(); // Tessera - per thread
+             return itemInHand;
+         }
+         // Paper end - Fix PlayerBucketEmptyEvent result itemstack
+@@ -150,7 +150,7 @@ public class BucketItem extends Item implements DispensibleContainerItem {
+                         player.containerMenu.sendAllDataToRemote(); // SPIGOT-4541
+                         return false;
+                     }
+-                    itemLeftInHandAfterPlayerBucketEmptyEvent = event.getItemStack() != null ? event.getItemStack().equals(org.bukkit.inventory.ItemStack.of(org.bukkit.Material.BUCKET)) ? null : org.bukkit.craftbukkit.inventory.CraftItemStack.asNMSCopy(event.getItemStack()) : ItemStack.EMPTY; // Paper - Fix PlayerBucketEmptyEvent result itemstack
++                    itemLeftInHandAfterPlayerBucketEmptyEvent.set(event.getItemStack() != null ? event.getItemStack().equals(org.bukkit.inventory.ItemStack.of(org.bukkit.Material.BUCKET)) ? null : org.bukkit.craftbukkit.inventory.CraftItemStack.asNMSCopy(event.getItemStack()) : ItemStack.EMPTY); // Paper - Fix PlayerBucketEmptyEvent result itemstack // Tessera - per thread
+                 }
+                 // CraftBukkit end
+                 if (level.environmentAttributes().getValue(EnvironmentAttributes.WATER_EVAPORATES, pos) && this.content.is(FluidTags.WATER)) {
+@@ -177,7 +177,7 @@ public class BucketItem extends Item implements DispensibleContainerItem {
+ 
+                     if (!level.setBlock(pos, this.content.defaultFluidState().createLegacyBlock(), Block.UPDATE_ALL_IMMEDIATE)
+                         && !blockState.getFluidState().isSource()) {
+-                        itemLeftInHandAfterPlayerBucketEmptyEvent = null; // Paper - Fix PlayerBucketEmptyEvent result itemstack
++                        itemLeftInHandAfterPlayerBucketEmptyEvent.remove(); // Paper - Fix PlayerBucketEmptyEvent result itemstack // Tessera - per thread
+                         return false;
+                     }
+ 

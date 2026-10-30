@@ -58,6 +58,10 @@
   - Проверено, что spark (последняя версия с поддержкой Folia) запускается и снимает профиль. Если не запускается —
     записать почему и что нужно.
 - **Проверка.** Тестовый плагин печатает отчёт. `jconsole` / `jcmd` показывает MBean.
+- **Образец.** Canvas (CraftCanvasMC/Canvas, GPL-3.0): region API `WorldRegionizer` / `ChunkRegion` / `RegionTickData`
+  (MSPT/TPS/utilization по окнам, список регионов, чанки региона), сущностей/игроков и MBean у них нет. Их профиль одного
+  региона в spark держится на закреплении региона за потоком своего планировщика — на EDF-планировщике Folia так нельзя.
+  Без закрепления можно взять адаптер spark под Folia (TickStatistics и WorldInfo по регионам).
 
 ---
 
@@ -100,6 +104,8 @@
 ### T-016 Энд-гейтвей (портал к внешним островам) не работает — [#51](https://github.com/PaperMC/Folia/issues/51)
 - **Где.** `TheEndGatewayBlockEntity` (`teleportTick`, поиск выхода `findOrCreateValidTeleportPos` — грузит чанки, на Folia
   нельзя синхронно), `EndGatewayBlock#getPortalDestination`.
+- **Образец.** Canvas после телепорта ищет выход от фактической позиции прибывшей сущности (`teleportedEntity.blockPosition()`),
+  а не от `exitPortal`. Решает ли это #51 целиком — проверить.
 - **Готово, когда.** Жемчуг или игрок в гейтвее попадает на внешние острова, выход ищется асинхронно, без синхронной
   загрузки чанков.
 
@@ -121,6 +127,9 @@
 
 ### T-020 `/gamerule locatorBar true` не работает — [#370](https://github.com/PaperMC/Folia/issues/370)
 - **Где.** `ServerWaypointManager` (глобальное состояние на мир, обновление трекинга точек между регионами).
+- **Образец.** Canvas `RegionizedWaypointManager` (~280 строк): потокобезопасные множества точек и игроков, каждое
+  изменение связи выполняется на потоке получающего игрока через `taskScheduler.scheduleOrExecute`, связи хранятся в поле
+  игрока. Нужен ещё untrack/track при телепорте внутри региона.
 
 ### T-021 Не работают команда `/dialog` — [#434](https://github.com/PaperMC/Folia/issues/434) — и Conversation API — [#216](https://github.com/PaperMC/Folia/issues/216)
 - **Где.** `DialogCommand`, `CraftConversation` / `ConversationTracker` (использует Bukkit scheduler и главный поток).
@@ -142,6 +151,7 @@
 ### T-026 Ошибка генерации блоков — [#61](https://github.com/PaperMC/Folia/issues/61)
 - Сначала воспроизвести на 26.3. Если не воспроизводится — закрыть.
 
+
 ---
 
 ## P1 — краши и зависания
@@ -156,12 +166,21 @@
   `TickThread.isTickThreadFor(...)` и пропустить или отложить действие — по образцу уже сделанного патча
   «Validate region ownership in AI behaviours». Каждый случай — отдельный коммит.
 - **Готово, когда.** Для каждого стектрейса есть патч или запись «не воспроизводится на 26.3».
+- **Образцы из Canvas.**
+  - #386: `Mob#setTarget` не принимает цель из чужого региона; подкрепление зомби не грузит чанки
+    (`getChunkIfLoadedImmediately`).
+  - #199: в `Entity#move` при смещении в чужой регион бросается своё исключение, `Level#guardEntityTick` ловит его и
+    делает `teleportAsync` в точку назначения вместо краша (подход Luminol). Самодостаточно.
+  - #203: точечные проверки в `TamableAnimal`, `Creaking`, `AllayAi`, `DragonFireball`, `startSleeping` (кровать в чужом
+    регионе), случайный телепорт хоруса и эндермена (`randomTeleport` проверяет владение целевой областью).
 
 ### T-031 Жители принудительно грузят чанки ради POI — [#292](https://github.com/PaperMC/Folia/issues/292)
 - **Где.** `PoiManager#ensureLoadedAndValid`, `AcquirePoi`, `YieldJobSite`, `SetClosestHomeAsWalkTarget`. Поиск POI грузит
   чанки синхронно.
 - **Готово, когда.** Поиск POI не грузит чанки вне региона и не держит регион. В профиле нет `ensureLoadedAndValid` в
   горячих местах.
+- **Образец.** Canvas: `AcquirePoi.create(...)` получил `scanRange` и `shouldLoad`, опция загрузки чанков (по умолчанию —
+  ваниль) и меньшие радиусы поиска jobsite/home/meeting; `SetClosestHomeAsWalkTarget` переведён на `PoiAccess` Paper.
 
 ### T-032 Конкуренция за блокировки — [#291](https://github.com/PaperMC/Folia/issues/291)
 - Снять профиль конкуренции (JFR `jdk.JavaMonitorEnter`, `jdk.ThreadPark`) при 50+ ботах в разных регионах, найти
@@ -170,10 +189,34 @@
 ### T-033 Ошибка RPC management server — [#416](https://github.com/PaperMC/Folia/issues/416)
 - **Где.** `net.minecraft.server.jsonrpc` (`minecraft:server/status` читает состояние сервера с IO-потока). Перевести
   чтение на глобальный тик или на потокобезопасные снимки.
+- **Образец.** Canvas: `MinecraftExecutorServiceImpl.submit` выполняет задачи через `RegionizedServer.scheduleToOrExecute`,
+  `jsonRpcServer.tick()` перенесён в глобальный тик, `saveEverything` — асинхронный `/save-all`.
 
 ### T-034 Зависания и самопроизвольная остановка — [#447](https://github.com/PaperMC/Folia/issues/447), [#437](https://github.com/PaperMC/Folia/issues/437), [#196](https://github.com/PaperMC/Folia/issues/196)
 - Логов в issue мало. Нужны watchdog-дампы с живых серверов на Tessera.
 - Улучшить watchdog: при зависании региона печатать стек потока региона, центр региона, мир, число сущностей и чанков.
+  Образец — `FoliaWatchdogThread` в Canvas (полный стек, удерживаемые мониторы, состояние потока).
+
+### T-035 Мелкие гонки между регионами
+Найдено при сравнении с Canvas, у Folia/Tessera не исправлено. Каждый пункт — отдельный коммит.
+- **`/bossbar`.** `CustomBossEvents` — обычный `HashMap`, к нему ходят разные регионы. У Canvas — RW-lock и копия при
+  сохранении.
+- **`/data storage`.** `CommandStorage` — `ConcurrentHashMap` и `synchronized` на контейнер при записи и сериализации.
+- **`LevelStorageSource.resources`.** `HashMap` → `ConcurrentMap`.
+- **Якорь возрождения.** Заряд списывается синхронно с потока игрока, хотя якорь может быть в чужом регионе. Списывать
+  на владельце позиции (`loadOrRunAtChunksAsync`), звук — после размещения игрока.
+- **Титры энда.** Игрока сначала убрать из энда, потом показать титры (иначе застревание в пустоте); регион держать тикетом.
+- **Достижения и «Герой деревни».** Триггеры критериев (`TargetBlock`, `ZombieVillager`, `LivingEntity#onItemPickup`) и
+  эффект после рейда выполнять на потоке игрока (`taskScheduler.scheduleOrExecute`), а не на потоке региона-источника.
+- **Карты сокровищ.** `ExplorationMapFunction`: `start.tryReference()` вместо `canBeReferenced()` + `addReference`
+  (атомарная проверка и захват структуры).
+- **Moonrise#130.** `ParallelSearchRadiusIteration`: ограничить индекс радиуса длиной таблицы (AIOOBE).
+- **Готово, когда.** Каждый пункт — патч или запись «не воспроизводится на 26.3».
+
+### T-036 Лимит игроков: заходит ли последний — проверить
+- **Где.** `countConnection` в Region-Threading-Base: `if (count >= limit) return false;`. Canvas поменял на `>` с
+  комментарием «fix Folia max player count breaking Vanilla».
+- **Готово, когда.** Проверено ботами: при `max-players=N` заходят ровно N игроков (как на Paper). Если нет — поправить условие.
 
 ---
 
@@ -227,7 +270,7 @@
   при `canCreatePortal=false` и отсутствии портала сущность ставится в точку поиска, а не остаётся на месте, как в Paper; откат
   после отменённого `PlayerMoveEvent` идёт через `teleportAsync` и сам вызывает `PlayerTeleportEvent`, его можно отменить.
 - **T-067** `teleportAsync` из `PlayerJoinEvent` роняет регион: в событии `IllegalStateException: Player is already removed from player chunk loader` (`transformForAsyncTeleport` → `removePlayerImmediately`), затем регион падает с NPE в `ChunkMap.newTrackerTick` (`getChunkStatus()` null). Нужно отложить телепорт до полного входа или отказать с понятной ошибкой. Воспроизводится тестовым плагином T-004.
-- **T-064** Края выгрузки миров (после T-001): сущность или игрок, чей асинхронный телепорт в мир начался до `unloadWorld`, и вход игрока, сохранённого в этом мире, в момент выгрузки. Сейчас `unloadWorld` проверяет только игроков в мире и запрещает новые `teleportAsync` туда. Пока мир сохраняется, глобальный поток ждёт (на тестах 0,1–1,4 с).
+- **T-064** Края выгрузки миров (после T-001): сущность или игрок, чей асинхронный телепорт в мир начался до `unloadWorld`, и вход игрока, сохранённого в этом мире, в момент выгрузки. Сейчас `unloadWorld` проверяет только игроков в мире и запрещает новые `teleportAsync` туда. Пока мир сохраняется, глобальный поток ждёт (на тестах 0,1–1,4 с). Образец — Canvas `unloadWorldAsync`: счётчик входящих в мир игроков (учёт в `PrepareSpawnTask`, снятие при дисконнекте), выгрузка на отдельном потоке, телепортирующиеся в мир возвращаются в точку отправления.
 
 ---
 
@@ -254,3 +297,4 @@
 | Загрузка и выгрузка миров (`createWorld` / `unloadWorld`), T-001 | #134 | 0025 / paper 0010 |
 | `PlayerTeleportEvent` / `EntityTeleportEvent` и события порталов для асинхронных телепортов, T-002 | #490, #330 | 0026 / api 0005 |
 | Потокобезопасный скорборд: личные доски, команды, `/team`, `/scoreboard`, T-004 | #25 | 0027 / paper 0011 |
+| Результат `PlayerBucketEmptyEvent` у каждого потока свой, T-027 | — | 0028 |
