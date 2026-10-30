@@ -1,0 +1,228 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 08:37:46 +0300
+Subject: [PATCH] Add compatibility mode for plugins not marked as Folia
+ supported
+
+Plugins without folia-supported: true were refused, and the
+BukkitScheduler threw UnsupportedOperationException for every task.
+Plugins listed under compat.plugins in tessera.yml (or "*") are now
+loaded with a warning, and their BukkitScheduler tasks are accepted:
+sync tasks run on the global region thread, async tasks on the Bukkit
+async pool, with task ids, cancelling, isQueued and getPendingTasks
+working as on Paper. Their tasks are cancelled when the plugin is
+disabled. Plugins marked as Folia supported see no change, and with
+nothing listed the scheduler still throws.
+
+Changing blocks or entities from such a task still fails off the
+owning region thread; that is handled separately.
+
+diff --git a/src/main/java/io/papermc/paper/plugin/PluginInitializerManager.java b/src/main/java/io/papermc/paper/plugin/PluginInitializerManager.java
+index 5741a60faba70da485053599c9370f0e27e868f4..637f5686203df1483fd1df76c14a1a8f29899082 100644
+--- a/src/main/java/io/papermc/paper/plugin/PluginInitializerManager.java
++++ b/src/main/java/io/papermc/paper/plugin/PluginInitializerManager.java
+@@ -97,6 +97,7 @@ public class PluginInitializerManager {
+ 
+     public static void load(OptionSet optionSet) throws Exception {
+         LOGGER.info("Initializing plugins...");
++        io.papermc.paper.threadedregions.TesseraCompat.load(((java.io.File) optionSet.valueOf("paper-settings-directory")).toPath().resolve("tessera.yml")); // Tessera - compatibility mode
+         // We have to load the bukkit configuration inorder to get the update folder location.
+         io.papermc.paper.plugin.PluginInitializerManager pluginSystem = io.papermc.paper.plugin.PluginInitializerManager.init(optionSet);
+ 
+diff --git a/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java b/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
+index 455e8c24d98fcd0ae0a349737a0e709a05ed9170..f4d3f6bd601ce832a7a5ba52a552055702c47b13 100644
+--- a/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
++++ b/src/main/java/io/papermc/paper/plugin/manager/PaperPluginInstanceManager.java
+@@ -260,6 +260,16 @@ class PaperPluginInstanceManager {
+         }
+ 
+         // Folia - region threading
++        // Tessera start - cancel BukkitScheduler tasks of plugins in compatibility mode
++        if (io.papermc.paper.threadedregions.TesseraCompat.isCompat(plugin)) {
++            try {
++                this.server.getScheduler().cancelTasks(plugin);
++            } catch (Throwable ex) {
++                this.handlePluginException("Error occurred (in the plugin loader) while cancelling tasks for "
++                    + pluginName + " (Is it up to date?)", ex, plugin); // Paper
++            }
++        }
++        // Tessera end - cancel BukkitScheduler tasks of plugins in compatibility mode
+ 
+         // Paper start - Folia schedulers
+         try {
+diff --git a/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginProviderFactory.java b/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginProviderFactory.java
+index 6369b13e1fcdbdb25dd9d6e4d3bffdedbee4f739..4e143a8fa780d3d0708b62089898cc0331b58ae7 100644
+--- a/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginProviderFactory.java
++++ b/src/main/java/io/papermc/paper/plugin/provider/type/paper/PaperPluginProviderFactory.java
+@@ -25,8 +25,8 @@ class PaperPluginProviderFactory implements PluginTypeFactory<PaperPluginParent,
+     @Override
+     public PaperPluginParent build(JarFile file, PaperPluginMeta configuration, Path source) {
+         // Folia start - block plugins not marked as supported
+-        if (!configuration.isFoliaSupported()) {
+-            throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia!");
++        if (!configuration.isFoliaSupported() && !io.papermc.paper.threadedregions.TesseraCompat.allowUnsupported(configuration.getName())) { // Tessera - compatibility mode
++            throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia! To load it anyway, add it to compat.plugins in tessera.yml"); // Tessera - compatibility mode
+         }
+         // Folia end - block plugins not marked as supported
+         Logger jul = PaperPluginLogger.getLogger(configuration);
+diff --git a/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java b/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
+index 6ef0042a355c65262bdb89dcf151bd644653216d..2695de1cb03042e9d54746d1d7fca1d01d902594 100644
+--- a/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
++++ b/src/main/java/io/papermc/paper/plugin/provider/type/spigot/SpigotPluginProviderFactory.java
+@@ -27,8 +27,8 @@ class SpigotPluginProviderFactory implements PluginTypeFactory<SpigotPluginProvi
+     @Override
+     public SpigotPluginProvider build(JarFile file, PluginDescriptionFile configuration, Path source) throws InvalidDescriptionException {
+         // Folia start - block plugins not marked as supported
+-        if (!configuration.isFoliaSupported()) {
+-            throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia!");
++        if (!configuration.isFoliaSupported() && !io.papermc.paper.threadedregions.TesseraCompat.allowUnsupported(configuration.getName())) { // Tessera - compatibility mode
++            throw new RuntimeException("Could not load plugin '" + configuration.getDisplayName() + "' as it is not marked as supporting Folia! To load it anyway, add it to compat.plugins in tessera.yml"); // Tessera - compatibility mode
+         }
+         // Folia end - block plugins not marked as supported
+         // Copied from SimplePluginManager#loadPlugins
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..b9e1503485923bf3e8c9208afbb94b006b97ba6d
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -0,0 +1,110 @@
++package io.papermc.paper.threadedregions;
++
++import com.mojang.logging.LogUtils;
++import java.io.IOException;
++import java.io.Reader;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++import java.util.Set;
++import org.bukkit.plugin.Plugin;
++import org.slf4j.Logger;
++import org.yaml.snakeyaml.Yaml;
++import org.yaml.snakeyaml.error.YAMLException;
++
++/**
++ * Compatibility mode for plugins that are not marked as supporting Folia.
++ * <p>
++ * Plugins listed in {@code tessera.yml} are loaded even without {@code folia-supported: true}, and their
++ * {@link org.bukkit.scheduler.BukkitScheduler} tasks run on the global region thread. Plugins that are marked
++ * as supporting Folia are not affected.
++ */
++public final class TesseraCompat {
++
++    private static final Logger LOGGER = LogUtils.getClassLogger();
++    private static final String DEFAULT_CONFIG = """
++        # Tessera settings.
++
++        compat:
++          # Plugins that are not marked as supporting Folia (folia-supported: true) but are loaded anyway,
++          # by plugin name, or "*" for all of them. Their BukkitScheduler tasks run on the global region
++          # thread. Changing blocks or entities from such a task still fails off the owning region thread.
++          plugins: []
++        """;
++
++    private static volatile Set<String> plugins = Set.of();
++    private static volatile boolean allPlugins;
++
++    private TesseraCompat() {
++    }
++
++    public static void load(final Path file) {
++        try {
++            if (Files.notExists(file)) {
++                if (file.getParent() != null) {
++                    Files.createDirectories(file.getParent());
++                }
++                Files.writeString(file, DEFAULT_CONFIG);
++            }
++
++            final Object root;
++            try (final Reader reader = Files.newBufferedReader(file)) {
++                root = new Yaml().load(reader);
++            }
++
++            final Set<String> names = new HashSet<>();
++            boolean all = false;
++            if (root instanceof Map<?, ?> map && map.get("compat") instanceof Map<?, ?> compat
++                && compat.get("plugins") instanceof List<?> list) {
++                for (final Object entry : list) {
++                    final String name = entry == null ? "" : entry.toString().trim();
++                    if (name.equals("*")) {
++                        all = true;
++                    } else if (!name.isEmpty()) {
++                        names.add(name.toLowerCase(Locale.ROOT));
++                    }
++                }
++            }
++            plugins = Set.copyOf(names);
++            allPlugins = all;
++        } catch (final IOException | YAMLException ex) {
++            LOGGER.error("Could not read {}, compatibility mode is off", file, ex);
++        }
++    }
++
++    /**
++     * Returns whether any plugin may run in compatibility mode.
++     */
++    public static boolean enabled() {
++        return allPlugins || !plugins.isEmpty();
++    }
++
++    /**
++     * Returns whether a plugin that is not marked as supporting Folia may be loaded.
++     */
++    public static boolean isListed(final String pluginName) {
++        return allPlugins || plugins.contains(pluginName.toLowerCase(Locale.ROOT));
++    }
++
++    /**
++     * Same as {@link #isListed(String)}, and logs that the plugin is loaded in compatibility mode.
++     */
++    public static boolean allowUnsupported(final String pluginName) {
++        if (!isListed(pluginName)) {
++            return false;
++        }
++        LOGGER.warn("Loading {} in compatibility mode: it is not marked as supporting Folia. "
++            + "Its scheduler tasks run on the global region thread; changing blocks or entities from them may fail.", pluginName);
++        return true;
++    }
++
++    /**
++     * Returns whether a loaded plugin runs in compatibility mode.
++     */
++    public static boolean isCompat(final Plugin plugin) {
++        return !plugin.getPluginMeta().isFoliaSupported();
++    }
++}
+diff --git a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+index c4dcddc4db02ed3641d05fae31ead7c13205f841..deae476c8e6e75476b6bed1a2d7a2ddf07221370 100644
+--- a/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
++++ b/src/main/java/org/bukkit/craftbukkit/scheduler/CraftScheduler.java
+@@ -514,7 +514,11 @@ public class CraftScheduler implements BukkitScheduler {
+     }
+ 
+     protected CraftTask handle(final CraftTask task, final long delay) { // Paper
+-        if (true) throw new UnsupportedOperationException(); // Folia - region threading
++        // Tessera start - run BukkitScheduler tasks of plugins in compatibility mode
++        if (!io.papermc.paper.threadedregions.TesseraCompat.enabled() || (task.getOwner() != null && !io.papermc.paper.threadedregions.TesseraCompat.isCompat(task.getOwner()))) {
++            throw new UnsupportedOperationException(); // Folia - region threading
++        }
++        // Tessera end - run BukkitScheduler tasks of plugins in compatibility mode
+         // Paper start
+         if (!this.isAsyncScheduler && !task.isSync()) {
+             this.asyncScheduler.handle(task, delay);
+diff --git a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java b/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
+index 3afdecc8ce6fdcfc1d13a1d210c842d0e40f09c4..4a9bcc3856c442ab812236a2f3f9e5610704a6d3 100644
+--- a/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
++++ b/src/main/java/org/bukkit/craftbukkit/util/CraftMagicNumbers.java
+@@ -379,7 +379,7 @@ public final class CraftMagicNumbers implements UnsafeValues {
+         }
+ 
+         // Folia start - block plugins not marked as supported
+-        if (!descriptionFile.isFoliaSupported()) {
++        if (!descriptionFile.isFoliaSupported() && !io.papermc.paper.threadedregions.TesseraCompat.isListed(descriptionFile.getName())) { // Tessera - compatibility mode
+             throw new InvalidPluginException("Plugin " + descriptionFile.getFullName() + " is not marked as supporting regionised multithreading");
+         }
+         // Folia end - block plugins not marked as supported

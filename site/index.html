@@ -126,7 +126,9 @@
   <p>Grab the <code>*-paperclip-*.jar</code> from <a href="https://github.com/denfry/tessera/releases">Releases</a>
     or from the latest <a href="https://github.com/denfry/tessera/actions/workflows/release.yml">Release workflow</a> run. Java 25 is required.</p>
 <pre>java -Xms4G -Xmx4G -jar server.jar --nogui</pre>
-  <p>Only plugins that declare <code>folia-supported: true</code> are loaded. Paper's API already has the
+  <p>By default only plugins that declare <code>folia-supported: true</code> are loaded; others can be listed under
+    <code>compat.plugins</code> in <code>config/tessera.yml</code> to run in compatibility mode, with their
+    <code>BukkitScheduler</code> tasks on the global region thread. Paper's API already has the
     Folia schedulers (<code>getRegionScheduler()</code>, <code>getGlobalRegionScheduler()</code>,
     <code>getAsyncScheduler()</code>, <code>Entity#getScheduler()</code>), so a plugin written against them
     runs unchanged on Paper and Tessera. Plugins we have run on Tessera are listed in

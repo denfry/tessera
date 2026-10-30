@@ -54,9 +54,14 @@ reviewed, dropped or sent upstream on its own.
 
 ## Plugins
 
-Tessera runs only plugins that declare `folia-supported: true`. Paper's API already ships the
+By default Tessera runs only plugins that declare `folia-supported: true`. Paper's API already ships the
 Folia schedulers (`getRegionScheduler()`, `getGlobalRegionScheduler()`, `getAsyncScheduler()`,
 `Entity#getScheduler()`), so a plugin written against them runs unchanged on Paper, Leaf and Tessera.
+
+Plugins without the flag can be loaded in compatibility mode: list them under `compat.plugins` in
+`config/tessera.yml` (or use `"*"`). Their `BukkitScheduler` tasks then run on the global region thread.
+Changing blocks or entities from such a task still fails for now, so this suits plugins that mostly
+send messages, run commands and keep their own data. Plugins marked as Folia supported are not affected.
 
 ## Download
 

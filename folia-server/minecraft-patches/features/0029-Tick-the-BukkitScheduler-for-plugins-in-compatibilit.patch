@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 08:37:46 +0300
+Subject: [PATCH] Tick the BukkitScheduler for plugins in compatibility mode
+
+The BukkitScheduler heartbeat was removed with the main thread. When a
+plugin runs in compatibility mode, the global region tick drives it
+again, so its sync tasks run on the global region thread once per tick.
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index d859c70b787e66af8cd1d0e7f40e2545a29b3cac..4b4c48e4cf0376cbfbcc79532fd5456491256160 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -252,6 +252,11 @@ public final class RegionizedServer {
+ 
+         // scheduler
+         ((FoliaGlobalRegionScheduler)Bukkit.getGlobalRegionScheduler()).tick();
++        // Tessera start - BukkitScheduler tasks of plugins in compatibility mode run on the global region
++        if (io.papermc.paper.threadedregions.TesseraCompat.enabled()) {
++            ((org.bukkit.craftbukkit.CraftServer)Bukkit.getServer()).getScheduler().mainThreadHeartbeat();
++        }
++        // Tessera end - BukkitScheduler tasks of plugins in compatibility mode run on the global region
+ 
+         // clock tick
+         this.tickClocks();
