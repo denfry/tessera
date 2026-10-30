@@ -60,8 +60,8 @@ Folia schedulers (`getRegionScheduler()`, `getGlobalRegionScheduler()`, `getAsyn
 
 Plugins without the flag can be loaded in compatibility mode: list them under `compat.plugins` in
 `config/tessera.yml` (or use `"*"`). Their `BukkitScheduler` tasks then run on the global region thread.
-Changing blocks or entities from such a task still fails for now, so this suits plugins that mostly
-send messages, run commands and keep their own data. Plugins marked as Folia supported are not affected.
+Such a task can read and change blocks and entities in loaded chunks: the regions it touches are paused
+until it finishes (see [COMPAT.md](COMPAT.md)). Plugins marked as Folia supported are not affected.
 
 ## Download
 

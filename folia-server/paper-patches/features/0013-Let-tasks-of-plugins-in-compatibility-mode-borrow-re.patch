@@ -1,0 +1,113 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 08:55:22 +0300
+Subject: [PATCH] Let tasks of plugins in compatibility mode borrow regions
+
+A BukkitScheduler task of a plugin in compatibility mode runs on the
+global region thread, so every block or entity access failed the thread
+check. When a thread check fails inside such a task, the region owning
+the chunk is borrowed (see TesseraRegionLoan) and the check is repeated.
+The success path of the checks is unchanged, and outside such a task a
+failed check throws as before.
+
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+index 72a3478a98912caae8899df37218dd2a628a6e05..bbfd65e76fa88760bb1cd09901ba61faaeacfee0 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+@@ -55,7 +55,7 @@ public class TickThread extends Thread {
+     }
+ 
+     public static void ensureTickThread(final Level world, final BlockPos pos, final String reason) {
+-        if (!isTickThreadFor(world, pos)) {
++        if (!isTickThreadFor(world, pos) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, pos.getX() >> 4, pos.getZ() >> 4) && isTickThreadFor(world, pos))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                                reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos;
+             LOGGER.error(ex, new Throwable());
+@@ -64,7 +64,7 @@ public class TickThread extends Thread {
+     }
+ 
+     public static void ensureTickThread(final Level world, final BlockPos pos, final int blockRadius, final String reason) {
+-        if (!isTickThreadFor(world, pos, blockRadius)) {
++        if (!isTickThreadFor(world, pos, blockRadius) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, pos.getX() >> 4, pos.getZ() >> 4) && isTickThreadFor(world, pos, blockRadius))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos + ", block_radius=" + blockRadius;
+             LOGGER.error(ex, new Throwable());
+@@ -73,7 +73,7 @@ public class TickThread extends Thread {
+     }
+ 
+     public static void ensureTickThread(final Level world, final ChunkPos pos, final String reason) {
+-        if (!isTickThreadFor(world, pos)) {
++        if (!isTickThreadFor(world, pos) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, pos.x(), pos.z()) && isTickThreadFor(world, pos))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + pos;
+             LOGGER.error(ex, new Throwable());
+@@ -82,7 +82,7 @@ public class TickThread extends Thread {
+     }
+ 
+     public static void ensureTickThread(final Level world, final int chunkX, final int chunkZ, final String reason) {
+-        if (!isTickThreadFor(world, chunkX, chunkZ)) {
++        if (!isTickThreadFor(world, chunkX, chunkZ) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, chunkX, chunkZ) && isTickThreadFor(world, chunkX, chunkZ))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + new ChunkPos(chunkX, chunkZ);
+             LOGGER.error(ex, new Throwable());
+@@ -91,7 +91,7 @@ public class TickThread extends Thread {
+     }
+ 
+     public static void ensureTickThread(final Entity entity, final String reason) {
+-        if (!isTickThreadFor(entity)) {
++        if (!isTickThreadFor(entity) && !(entity != null && io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(entity.level(), entity.chunkPosition().x(), entity.chunkPosition().z()) && isTickThreadFor(entity))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", entity=" + EntityUtil.dumpEntity(entity);
+             LOGGER.error(ex, new Throwable());
+@@ -100,7 +100,7 @@ public class TickThread extends Thread {
+     }
+ 
+     public static void ensureTickThread(final Level world, final AABB aabb, final String reason) {
+-        if (!isTickThreadFor(world, aabb)) {
++        if (!isTickThreadFor(world, aabb) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, CoordinateUtils.getChunkCoordinate(aabb.minX), CoordinateUtils.getChunkCoordinate(aabb.minZ)) && isTickThreadFor(world, aabb))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", aabb=" + aabb;
+             LOGGER.error(ex, new Throwable());
+@@ -109,7 +109,7 @@ public class TickThread extends Thread {
+     }
+ 
+     public static void ensureTickThread(final Level world, final double blockX, final double blockZ, final String reason) {
+-        if (!isTickThreadFor(world, blockX, blockZ)) {
++        if (!isTickThreadFor(world, blockX, blockZ) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, CoordinateUtils.getChunkCoordinate(blockX), CoordinateUtils.getChunkCoordinate(blockZ)) && isTickThreadFor(world, blockX, blockZ))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + new Vec3(blockX, 0.0, blockZ);
+             LOGGER.error(ex, new Throwable());
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index b9e1503485923bf3e8c9208afbb94b006b97ba6d..3273c64a3ca0e3943d4a5b1aaee84385ec4893a3 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -19,8 +19,8 @@ import org.yaml.snakeyaml.error.YAMLException;
+  * Compatibility mode for plugins that are not marked as supporting Folia.
+  * <p>
+  * Plugins listed in {@code tessera.yml} are loaded even without {@code folia-supported: true}, and their
+- * {@link org.bukkit.scheduler.BukkitScheduler} tasks run on the global region thread. Plugins that are marked
+- * as supporting Folia are not affected.
++ * {@link org.bukkit.scheduler.BukkitScheduler} tasks run on the global region thread, borrowing the regions they
++ * touch (see TesseraRegionLoan). Plugins that are marked as supporting Folia are not affected.
+  */
+ public final class TesseraCompat {
+ 
+@@ -31,7 +31,8 @@ public final class TesseraCompat {
+         compat:
+           # Plugins that are not marked as supporting Folia (folia-supported: true) but are loaded anyway,
+           # by plugin name, or "*" for all of them. Their BukkitScheduler tasks run on the global region
+-          # thread. Changing blocks or entities from such a task still fails off the owning region thread.
++          # thread and can use blocks and entities in loaded chunks: the regions they touch are paused
++          # for the duration of the task.
+           plugins: []
+         """;
+ 
+@@ -97,7 +98,7 @@ public final class TesseraCompat {
+             return false;
+         }
+         LOGGER.warn("Loading {} in compatibility mode: it is not marked as supporting Folia. "
+-            + "Its scheduler tasks run on the global region thread; changing blocks or entities from them may fail.", pluginName);
++            + "Its scheduler tasks run on the global region thread and pause the regions they touch.", pluginName);
+         return true;
+     }
+ 

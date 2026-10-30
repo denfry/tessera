@@ -1,0 +1,215 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 08:55:23 +0300
+Subject: [PATCH] Borrow regions for tasks of plugins in compatibility mode
+
+While the global tick runs BukkitScheduler tasks of plugins in
+compatibility mode, a failed thread check borrows the region owning the
+chunk: the region is marked as ticking, the way unloading a world takes
+regions, and becomes the current region of the global tick thread, so
+the task works on it as if it ran in that region's tick. Every borrowed
+region is released when the tasks finish. Waiting for a region that is
+ticking right now is limited to 500 ms.
+
+A scheduled tick or task run of a borrowed region is skipped instead of
+failing with "Scheduled region should be acquirable", and the tick is
+retried a millisecond later. Delay-0 tasks queued while plugins enable
+now run on the first global tick instead of the startup thread, where
+they could not borrow regions.
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 4b4c48e4cf0376cbfbcc79532fd5456491256160..117d3351140acf5c8e302cdf3c077e7ced3b2123 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -254,7 +254,7 @@ public final class RegionizedServer {
+         ((FoliaGlobalRegionScheduler)Bukkit.getGlobalRegionScheduler()).tick();
+         // Tessera start - BukkitScheduler tasks of plugins in compatibility mode run on the global region
+         if (io.papermc.paper.threadedregions.TesseraCompat.enabled()) {
+-            ((org.bukkit.craftbukkit.CraftServer)Bukkit.getServer()).getScheduler().mainThreadHeartbeat();
++            TesseraRegionLoan.runInScope(((org.bukkit.craftbukkit.CraftServer)Bukkit.getServer()).getScheduler()::mainThreadHeartbeat);
+         }
+         // Tessera end - BukkitScheduler tasks of plugins in compatibility mode run on the global region
+ 
+diff --git a/io/papermc/paper/threadedregions/TesseraRegionLoan.java b/io/papermc/paper/threadedregions/TesseraRegionLoan.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..e9d9ae5f64cbb717fbca54009855c7ec25c70345
+--- /dev/null
++++ b/io/papermc/paper/threadedregions/TesseraRegionLoan.java
+@@ -0,0 +1,114 @@
++package io.papermc.paper.threadedregions;
++
++import com.mojang.logging.LogUtils;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Set;
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.locks.LockSupport;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.world.level.Level;
++import org.slf4j.Logger;
++
++/**
++ * Lets the global tick thread borrow regions while it runs tasks of plugins in compatibility mode.
++ * <p>
++ * Inside {@link #runInScope(Runnable)}, a failed thread check calls {@link #borrow(Level, int, int)}: the region
++ * owning the chunk is marked as ticking, so no scheduler thread can tick it, and becomes the current region of the
++ * global tick thread. Every region borrowed this way is released when the scope ends. A borrowed region skips its
++ * ticks until then. See COMPAT.md.
++ */
++public final class TesseraRegionLoan {
++
++    private static final Logger LOGGER = LogUtils.getClassLogger();
++    private static final long MAX_WAIT_NS = TimeUnit.MILLISECONDS.toNanos(500L);
++
++    // read by the scheduler threads to tell a borrowed region from a broken one
++    private static final Set<TickRegions.TickRegionData> BORROWED = ConcurrentHashMap.newKeySet();
++    // only accessed by the global tick thread
++    private static final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> HELD = new ArrayList<>();
++    private static boolean inScope;
++
++    private TesseraRegionLoan() {
++    }
++
++    /**
++     * Runs the task with region loans allowed, then releases every borrowed region. Outside the global tick thread,
++     * or when already in a scope, just runs the task.
++     */
++    public static void runInScope(final Runnable run) {
++        if (!RegionizedServer.isGlobalTickThread() || inScope || TickRegionScheduler.getCurrentRegion() != null) {
++            run.run();
++            return;
++        }
++        inScope = true;
++        try {
++            run.run();
++        } finally {
++            inScope = false;
++            releaseAll();
++        }
++    }
++
++    static boolean isBorrowed(final TickRegions.TickRegionData region) {
++        return !BORROWED.isEmpty() && BORROWED.contains(region);
++    }
++
++    /**
++     * Borrows the region owning the chunk and makes it the current region, if the current thread is the global tick
++     * thread inside {@link #runInScope(Runnable)}. Returns {@code false} if not in a scope, if the chunk has no region
++     * (it is not loaded), or if the region could not be acquired in time.
++     */
++    public static boolean borrow(final Level level, final int chunkX, final int chunkZ) {
++        if (!RegionizedServer.isGlobalTickThread() || !inScope || !(level instanceof ServerLevel world)) {
++            return false;
++        }
++
++        final long deadline = System.nanoTime() + MAX_WAIT_NS;
++        for (;;) {
++            final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region =
++                world.regioniser.getRegionAtUnsynchronised(chunkX, chunkZ);
++            if (region == null) {
++                return false;
++            }
++            if (HELD.contains(region)) {
++                TickRegionScheduler.tesseraSetTickingRegion(region);
++                return true;
++            }
++
++            // mark first: once acquired, the scheduler must see the region as borrowed
++            BORROWED.add(region.getData());
++            if (region.tryMarkTicking(() -> false)) {
++                HELD.add(region);
++                TickRegionScheduler.tesseraSetTickingRegion(region);
++                return true;
++            }
++            BORROWED.remove(region.getData());
++
++            // the region is ticking right now, or being merged
++            if (System.nanoTime() - deadline > 0L) {
++                LOGGER.warn("Could not borrow region {} for a plugin task in {} ms", region.getCenterChunk(), TimeUnit.NANOSECONDS.toMillis(MAX_WAIT_NS));
++                return false;
++            }
++            LockSupport.parkNanos(20_000L);
++        }
++    }
++
++    private static void releaseAll() {
++        if (HELD.isEmpty()) {
++            return;
++        }
++        TickRegionScheduler.tesseraSetTickingRegion(null);
++        for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : HELD) {
++            try {
++                region.markNotTicking();
++            } catch (final Throwable thr) {
++                LOGGER.error("Failed to release borrowed region " + region, thr);
++            } finally {
++                BORROWED.remove(region.getData());
++            }
++        }
++        HELD.clear();
++    }
++}
+diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+index 5a72fa0d72bfdb927293abe921c57f6ae964a6ec..81592e1ab3f6ddee2e75882b40a83fbb38ca38a9 100644
+--- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+@@ -152,6 +152,17 @@ public final class TickRegionScheduler {
+         }
+     }
+ 
++    // Tessera start - region loans for plugins in compatibility mode
++    private static final long TESSERA_BORROWED_RETRY_NS = TimeUnit.MILLISECONDS.toNanos(1L);
++
++    // unlike setTickingRegion, switches between regions without unsetting; only for the global tick thread
++    static void tesseraSetTickingRegion(final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region) {
++        final TickThreadRunner tickThreadRunner = (TickThreadRunner)Thread.currentThread();
++        tickThreadRunner.currentTickingRegion = region;
++        tickThreadRunner.currentTickingWorldRegionizedData = region == null ? null : region.regioniser.world.worldRegionData.get();
++    }
++    // Tessera end - region loans for plugins in compatibility mode
++
+     private static void setTickTask(final SchedulableTick task) {
+         final Thread currThread = Thread.currentThread();
+         if (!(currThread instanceof TickThreadRunner tickThreadRunner)) {
+@@ -374,6 +385,12 @@ public final class TickRegionScheduler {
+ 
+             if (!this.tryMarkTicking()) {
+                 if (!this.cancelled.get()) {
++                    // Tessera start - region loans for plugins in compatibility mode
++                    if (this.region != null && TesseraRegionLoan.isBorrowed(this.region)) {
++                        // the global tick thread holds this region for a plugin task
++                        return true;
++                    }
++                    // Tessera end - region loans for plugins in compatibility mode
+                     throw new IllegalStateException("Scheduled region should be acquirable");
+                 }
+                 // region was killed
+@@ -434,6 +451,13 @@ public final class TickRegionScheduler {
+ 
+             if (!this.tryMarkTicking()) {
+                 if (!this.cancelled.get()) {
++                    // Tessera start - region loans for plugins in compatibility mode
++                    if (this.region != null && TesseraRegionLoan.isBorrowed(this.region)) {
++                        // the global tick thread holds this region for a plugin task, try again shortly
++                        this.setScheduledStart(tickStart + TESSERA_BORROWED_RETRY_NS);
++                        return true;
++                    }
++                    // Tessera end - region loans for plugins in compatibility mode
+                     throw new IllegalStateException("Scheduled region should be acquirable");
+                 }
+                 // region was killed
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 7336ed6fce34e0aae96893b18cd142d448e2fcfa..240298545a870a4ddf17c8e527ffc5500169f2cf 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1348,7 +1348,9 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+             // Paper start
+             LOGGER.info("Running delayed init tasks");
+             new io.papermc.paper.threadedregions.RegionizedServerInitEvent().callEvent(); // Call Folia init event
++            if (!io.papermc.paper.threadedregions.TesseraCompat.enabled()) { // Tessera - tasks of plugins in compatibility mode run on the global tick, where they can borrow regions
+             this.server.getScheduler().mainThreadHeartbeat(); // run all 1 tick delay tasks during init,
++            } // Tessera - tasks of plugins in compatibility mode run on the global tick, where they can borrow regions
+             // this is going to be the first thing the tick process does anyway, so move done and run it after
+             // everything is init before watchdog tick.
+             // anything at 3+ won't be caught here but also will trip watchdog....
