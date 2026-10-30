@@ -57,14 +57,6 @@ The workflow, code rules and test harness are in [AGENTS.md](AGENTS.md); patch r
   the same: all lecterns taken in ~8 s, not a single `LOSING_JOB` in 4 min. Not checked: day/night cycle, unloading and
   loading the farm chunks, villagers at a region border, a multi-hour run. If it comes up again, a world with the farm is needed.
 
-### T-031 Villagers force-load chunks for POI — [#292](https://github.com/PaperMC/Folia/issues/292)
-- **Where.** `PoiManager#ensureLoadedAndValid`, `AcquirePoi`, `YieldJobSite`, `SetClosestHomeAsWalkTarget`. POI search loads
-  chunks synchronously.
-- **Done when.** POI search does not load chunks outside the region and does not hold the region. No `ensureLoadedAndValid` in
-  hot spots in the profile.
-- **Reference.** Canvas: `AcquirePoi.create(...)` got `scanRange` and `shouldLoad`, a chunk loading option (vanilla by
-  default) and smaller jobsite/home/meeting search radii; `SetClosestHomeAsWalkTarget` switched to Paper's `PoiAccess`.
-
 ### T-032 Lock contention — [#291](https://github.com/PaperMC/Folia/issues/291)
 - Take a contention profile (JFR `jdk.JavaMonitorEnter`, `jdk.ThreadPark`) with 50+ bots in different regions, find
   hot monitors (as with POI in #530) and remove shared locks.
@@ -313,3 +305,4 @@ Folia regions are already isolated, the next step is spreading them across proce
 | Allay does not read a liked note block in another region, pets do not load chunks to teleport to the owner. Precaution from reading the code: the allay case did not fail on the old build, T-030 | #203 | 0054, 0055 |
 | Zombie reinforcements do not load chunks. Crash not reproducible on 26.3: 40 reinforcement rounds at the edge of the loaded area, no errors; foreign targets are dropped by `Mob#asValidTarget`, T-030 | #386 | 0058 |
 | Not reproducible on 26.3 or already fixed, T-030: #334 (`BabyFollowAdult`, patch 0016), #152 (fishing hook, patch 0038), #327 (`PlayerList.remove` no longer ticks the player), #199 spectator path (Folia checks the camera). #381 and the log of #203: logs expired, the title of #381 points to a plugin calling `getEntities` off-region. `DragonFireball` needs no check: the gap between regions is wider than its search box | #334, #152, #327, #381 | — |
+| Villager behaviours do not wait for POI data on the region thread: `PoiCompetitorScan`, `AssignProfessionFromJobSite`, `YieldJobSite` and `ValidateNearbyPoi` skip the tick when the POI chunk is not loaded and keep the memory. `performance.poi-searches-load-chunks` in `config/tessera.yml` (default `true`, vanilla) keeps the `AcquirePoi` search off the disk. Checked: 4 villagers took 4 lecterns in both modes, no errors. The stall itself was not measured, T-031 | #292 | 0059 / paper 0030 |

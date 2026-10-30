@@ -1,0 +1,49 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 12:28:28 +0300
+Subject: [PATCH] Add an option to keep POI searches off the disk
+
+Fixes PaperMC/Folia#292
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index a533fa64806a7f5c5ba61697ba550d1858ab4ad8..3beb147478b255ddb8414259646f424d5342bbab 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -44,10 +44,16 @@ public final class TesseraCompat {
+           # global region thread and can use blocks and entities in loaded chunks: the regions they touch
+           # are paused for the duration of the task.
+           plugins: []
++
++        performance:
++          # Villagers looking for a job site, bed or meeting point read POI data from disk when it is not
++          # loaded, which stalls the region. false searches loaded chunks only.
++          poi-searches-load-chunks: true
+         """;
+ 
+     private static volatile Set<String> plugins = Set.of();
+     private static volatile boolean allPlugins;
++    private static volatile boolean poiSearchesLoadChunks = true;
+ 
+     private TesseraCompat() {
+     }
+@@ -81,11 +87,20 @@ public final class TesseraCompat {
+             }
+             plugins = Set.copyOf(names);
+             allPlugins = all;
++            poiSearchesLoadChunks = !(root instanceof Map<?, ?> rootMap && rootMap.get("performance") instanceof Map<?, ?> performance
++                && Boolean.FALSE.equals(performance.get("poi-searches-load-chunks")));
+         } catch (final IOException | YAMLException ex) {
+             LOGGER.error("Could not read {}, compatibility mode is off", file, ex);
+         }
+     }
+ 
++    /**
++     * Returns whether POI searches of mobs may load POI data from disk.
++     */
++    public static boolean poiSearchesLoadChunks() {
++        return poiSearchesLoadChunks;
++    }
++
+     /**
+      * Returns whether any plugin may run in compatibility mode.
+      */

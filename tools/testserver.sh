@@ -22,8 +22,10 @@ rcon() { "$PYTHON" "$ROOT/tools/rcon.py" "$(property "$1" rcon.port)" "$RCON_PAS
 
 init() {
     local dir="$1" port="${TESSERA_TEST_PORT:-25600}"
-    mkdir -p "$dir/plugins"
+    mkdir -p "$dir/plugins/bStats"
     echo "eula=true" > "$dir/eula.txt"
+    # test servers stay out of the public bStats numbers
+    [ -f "$dir/plugins/bStats/config.yml" ] || echo "enabled: false" > "$dir/plugins/bStats/config.yml"
     [ -f "$dir/server.properties" ] || cat > "$dir/server.properties" <<EOF
 server-port=$port
 online-mode=false

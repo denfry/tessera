@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 12:28:28 +0300
+Subject: [PATCH] Do not wait for POI data on the region thread
+
+Behaviours that re-read a remembered job site or bed went through PoiManager#getOrLoad, which blocks the region thread on disk I/O when the POI chunk is not loaded. They now skip that tick and keep the memory. The search of AcquirePoi can stay off the disk with performance.poi-searches-load-chunks in config/tessera.yml (default true, vanilla behaviour).
+
+Fixes PaperMC/Folia#292
+
+diff --git a/net/minecraft/world/entity/ai/behavior/AcquirePoi.java b/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
+index e2eb02d8a0a9481be2308c9052582591bc4f9850..2e7e930a2f1835a3eb2c76f28a711b1c8dc6c2b2 100644
+--- a/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
++++ b/net/minecraft/world/entity/ai/behavior/AcquirePoi.java
+@@ -96,7 +96,7 @@ public class AcquirePoi {
+                         };
+                         // Paper start - optimise POI searches
+                         java.util.List<Pair<Holder<PoiType>, BlockPos>> poiPositionsRaw = new java.util.ArrayList<>();
+-                        ca.spottedleaf.moonrise.patches.poi_lookup.PoiAccess.findNearestPoiPositions(poiManager, poiType, cacheTest, body.blockPosition(), SCAN_RANGE, Double.MAX_VALUE, PoiManager.Occupancy.HAS_SPACE, ca.spottedleaf.moonrise.patches.poi_lookup.PoiAccess.LOAD_FOR_SEARCHING, 5, poiPositionsRaw);
++                        ca.spottedleaf.moonrise.patches.poi_lookup.PoiAccess.findNearestPoiPositions(poiManager, poiType, cacheTest, body.blockPosition(), SCAN_RANGE, Double.MAX_VALUE, PoiManager.Occupancy.HAS_SPACE, io.papermc.paper.threadedregions.TesseraCompat.poiSearchesLoadChunks(), 5, poiPositionsRaw); // Tessera - option to keep poi searches off the disk
+                         Set<Pair<Holder<PoiType>, BlockPos>> poiPositions = new java.util.HashSet<>(poiPositionsRaw.size());
+                         for (Pair<Holder<PoiType>, BlockPos> pair : poiPositionsRaw) {
+                             if (validPoi.test(level, pair.getSecond())) {
+diff --git a/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java b/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
+index dfc75e52679024c23dc154b86a599bc870a8e9d5..748d40278a19506b5909b08e3d0d8fc22a094fae 100644
+--- a/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
++++ b/net/minecraft/world/entity/ai/behavior/AssignProfessionFromJobSite.java
+@@ -38,7 +38,7 @@ public class AssignProfessionFromJobSite {
+ 
+                         MinecraftServer server = level.getServer();
+                         Optional.ofNullable(server.getLevel(pos.dimension()))
+-                            .flatMap(l -> l.getPoiManager().getType(pos.pos()))
++                            .flatMap(l -> l.getPoiManager().getTypeIfLoaded(pos.pos())) // Tessera - do not wait for poi data on the region thread
+                             .flatMap(
+                                 poiType -> BuiltInRegistries.VILLAGER_PROFESSION
+                                     .listElements()
+diff --git a/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java b/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
+index 53131c1b8d5562f9a1b45dfab4fdbdd37b655139..11bcf8a7c05862b5b5419913cf2c00544e705934 100644
+--- a/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
++++ b/net/minecraft/world/entity/ai/behavior/PoiCompetitorScan.java
+@@ -25,7 +25,7 @@ public class PoiCompetitorScan {
+                         }
+                         // Folia end - region threading
+                         level.getPoiManager()
+-                            .getType(pos.pos())
++                            .getTypeIfLoaded(pos.pos()) // Tessera - do not wait for poi data on the region thread
+                             .ifPresent(
+                                 // Paper start - Improve performance of PoiCompetitorScan by unrolling stream
+                                 // The previous logic used Stream#reduce to simulate a form of single-iteration bubble sort
+diff --git a/net/minecraft/world/entity/ai/behavior/ValidateNearbyPoi.java b/net/minecraft/world/entity/ai/behavior/ValidateNearbyPoi.java
+index 7e498d61e367e1ef7ebac61f46d724cbcf2b0752..e89080140fadcdce9edf7ce6c0e5b254df0e7e29 100644
+--- a/net/minecraft/world/entity/ai/behavior/ValidateNearbyPoi.java
++++ b/net/minecraft/world/entity/ai/behavior/ValidateNearbyPoi.java
+@@ -25,6 +25,7 @@ public class ValidateNearbyPoi {
+             BlockPos pos = globalPos.pos();
+             if (level.dimension() == globalPos.dimension() && pos.closerToCenterThan(body.position(), MAX_DISTANCE)) {
+                 ServerLevel poiLevel = level.getServer().getLevel(globalPos.dimension());
++                if (poiLevel != null && !poiLevel.getPoiManager().isPoiChunkLoaded(pos)) return true; // Tessera - do not wait for poi data on the region thread
+                 if (poiLevel == null || !poiLevel.getPoiManager().exists(pos, poiType)) {
+                     memory.erase();
+                 } else if (bedIsOccupied(poiLevel, pos, body)) {
+diff --git a/net/minecraft/world/entity/ai/behavior/YieldJobSite.java b/net/minecraft/world/entity/ai/behavior/YieldJobSite.java
+index 2d1c7fed3abf16a3e19c52d7b1486ae330f90515..732b06ba8f7c854b1aa3e2d0bbe19e58b0f9d720 100644
+--- a/net/minecraft/world/entity/ai/behavior/YieldJobSite.java
++++ b/net/minecraft/world/entity/ai/behavior/YieldJobSite.java
+@@ -43,7 +43,7 @@ public class YieldJobSite {
+                         // Folia end - region threading
+ 
+                         BlockPos poiPos = i.<GlobalPos>get(potentialJob).pos();
+-                        Optional<Holder<PoiType>> poiType = level.getPoiManager().getType(poiPos);
++                        Optional<Holder<PoiType>> poiType = level.getPoiManager().getTypeIfLoaded(poiPos); // Tessera - do not wait for poi data on the region thread
+                         if (poiType.isEmpty()) {
+                             return true;
+                         }
+diff --git a/net/minecraft/world/entity/ai/village/poi/PoiManager.java b/net/minecraft/world/entity/ai/village/poi/PoiManager.java
+index a44ef95e1a08b80a8c2bb01f60755eba6b04d88e..6b6c305e5c3c861e4b18ac9563ef0eb87da26f52 100644
+--- a/net/minecraft/world/entity/ai/village/poi/PoiManager.java
++++ b/net/minecraft/world/entity/ai/village/poi/PoiManager.java
+@@ -438,6 +438,17 @@ public class PoiManager extends SectionStorage<PoiSection, PoiSection.Packed> im
+         return this.getOrLoad(SectionPos.asLong(pos)).flatMap(section -> section.getType(pos));
+     }
+ 
++    // Tessera start - do not wait for poi data on the region thread
++    public Optional<Holder<PoiType>> getTypeIfLoaded(final BlockPos pos) {
++        return this.get(SectionPos.asLong(pos)).flatMap(section -> section.getType(pos));
++    }
++
++    public boolean isPoiChunkLoaded(final BlockPos pos) {
++        return ((ca.spottedleaf.moonrise.patches.chunk_system.level.ChunkSystemServerLevel)this.world).moonrise$getChunkTaskScheduler().chunkHolderManager
++            .getPoiChunkIfLoaded(pos.getX() >> 4, pos.getZ() >> 4, true) != null;
++    }
++    // Tessera end - do not wait for poi data on the region thread
++
+     @VisibleForDebug
+     public @Nullable DebugPoiInfo getDebugPoiInfo(final BlockPos pos) {
+         return this.getOrLoad(SectionPos.asLong(pos)).flatMap(section -> section.getDebugPoiInfo(pos)).orElse(null);
