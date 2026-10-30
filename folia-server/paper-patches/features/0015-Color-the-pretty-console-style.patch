@@ -1,0 +1,178 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Fri, 30 Oct 2026 09:09:00 +0300
+Subject: [PATCH] Color the pretty console style
+
+The time is gray, the level has its own color and each plugin tag gets a stable color picked from the logger name. Only the 16 basic ANSI colors are used, which web panels and the Windows console render. Color follows TerminalConsoleAppender's terminal.ansi; when it is not set, NO_COLOR turns color off, FORCE_COLOR turns it on without a TTY, and so does a Pterodactyl container (P_SERVER_UUID).
+
+diff --git a/src/log4jPlugins/java/io/papermc/paper/console/TesseraStyleConverter.java b/src/log4jPlugins/java/io/papermc/paper/console/TesseraStyleConverter.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..cbc7d1e9fd4558329881a26f4b7429f768f2d19e
+--- /dev/null
++++ b/src/log4jPlugins/java/io/papermc/paper/console/TesseraStyleConverter.java
+@@ -0,0 +1,96 @@
++package io.papermc.paper.console;
++
++import java.util.List;
++import net.minecrell.terminalconsole.TerminalConsoleAppender;
++import org.apache.logging.log4j.Level;
++import org.apache.logging.log4j.core.LogEvent;
++import org.apache.logging.log4j.core.config.Configuration;
++import org.apache.logging.log4j.core.config.plugins.Plugin;
++import org.apache.logging.log4j.core.layout.PatternLayout;
++import org.apache.logging.log4j.core.pattern.ConverterKeys;
++import org.apache.logging.log4j.core.pattern.LogEventPatternConverter;
++import org.apache.logging.log4j.core.pattern.PatternConverter;
++import org.apache.logging.log4j.core.pattern.PatternFormatter;
++import org.apache.logging.log4j.core.pattern.PatternParser;
++
++// Tessera start - pretty console colors
++/**
++ * {@code %tesseraStyle{pattern}{role}} colors the formatted pattern for the {@code pretty} console style. Roles:
++ * {@code time} (gray), {@code level} (by the event level) and {@code logger} (a stable color per logger name).
++ * Uses the 16 basic ANSI colors, which panels and the Windows console render, and emits nothing extra when
++ * {@link TerminalConsoleAppender#isAnsiSupported()} is false ({@code terminal.ansi}, {@code NO_COLOR}).
++ */
++@Plugin(name = "tesseraStyle", category = PatternConverter.CATEGORY)
++@ConverterKeys({"tesseraStyle"})
++public final class TesseraStyleConverter extends LogEventPatternConverter {
++
++    private static final String RESET = "[0m";
++    private static final String GRAY = "[90m";
++    // no red: it means errors
++    private static final String[] LOGGER_COLORS = {
++        "[36m", "[96m", "[35m", "[95m", "[94m", "[32m", "[92m", "[33m"
++    };
++
++    private enum Role { TIME, LEVEL, LOGGER }
++
++    private final List<PatternFormatter> formatters;
++    private final Role role;
++
++    private TesseraStyleConverter(final List<PatternFormatter> formatters, final Role role) {
++        super("tesseraStyle", null);
++        this.formatters = formatters;
++        this.role = role;
++    }
++
++    @Override
++    public void format(final LogEvent event, final StringBuilder toAppendTo) {
++        final int start = toAppendTo.length();
++        for (final PatternFormatter formatter : this.formatters) {
++            formatter.format(event, toAppendTo);
++        }
++        if (toAppendTo.length() == start || !TerminalConsoleAppender.isAnsiSupported()) {
++            return;
++        }
++        final String color = switch (this.role) {
++            case TIME -> GRAY;
++            case LEVEL -> levelColor(event.getLevel());
++            case LOGGER -> loggerColor(toAppendTo, start);
++        };
++        toAppendTo.insert(start, color).append(RESET);
++    }
++
++    static String levelColor(final Level level) {
++        return switch (level.getStandardLevel()) {
++            case FATAL, ERROR -> "[1;91m";
++            case WARN -> "[93m";
++            case INFO -> "[92m";
++            case DEBUG -> "[36m";
++            default -> GRAY;
++        };
++    }
++
++    static String loggerColor(final CharSequence text, final int start) {
++        int hash = 0;
++        for (int i = start, len = text.length(); i < len; ++i) {
++            hash = 31 * hash + text.charAt(i);
++        }
++        return LOGGER_COLORS[Math.floorMod(hash, LOGGER_COLORS.length)];
++    }
++
++    public static TesseraStyleConverter newInstance(final Configuration config, final String[] options) {
++        if (options.length != 2) {
++            LOGGER.error("Incorrect number of options on tesseraStyle. Expected exactly 2, received " + options.length);
++            return null;
++        }
++        final Role role;
++        try {
++            role = Role.valueOf(options[1].trim().toUpperCase(java.util.Locale.ROOT));
++        } catch (final IllegalArgumentException ex) {
++            LOGGER.error("Unknown tesseraStyle role '" + options[1] + "', expected time, level or logger");
++            return null;
++        }
++        final PatternParser parser = PatternLayout.createPatternParser(config);
++        return new TesseraStyleConverter(parser.parse(options[0]), role);
++    }
++}
++// Tessera end - pretty console colors
+diff --git a/src/main/java/io/papermc/paper/log/TesseraLogStyle.java b/src/main/java/io/papermc/paper/log/TesseraLogStyle.java
+index 757ba05726dfcb2c9720941686b8ec5c0c788d95..43be55457314f0ce65202236a53dff9e204a3771 100644
+--- a/src/main/java/io/papermc/paper/log/TesseraLogStyle.java
++++ b/src/main/java/io/papermc/paper/log/TesseraLogStyle.java
+@@ -1,6 +1,7 @@
+ package io.papermc.paper.log;
+ 
+ import java.util.Locale;
++import java.util.Map;
+ 
+ // Tessera start - console log style
+ /**
+@@ -14,6 +15,8 @@ public final class TesseraLogStyle {
+     public static final String ENV = "TESSERA_LOG_STYLE";
+     public static final String CLASSIC = "classic";
+     public static final String PRETTY = "pretty";
++    // TerminalConsoleAppender.ANSI_OVERRIDE_PROPERTY, kept as a string so this class does not load TCA early
++    static final String ANSI_PROPERTY = "terminal.ansi";
+ 
+     private TesseraLogStyle() {
+     }
+@@ -24,6 +27,29 @@ public final class TesseraLogStyle {
+             raw = System.getenv(ENV);
+         }
+         System.setProperty(PROPERTY, resolve(raw));
++        if (System.getProperty(ANSI_PROPERTY) == null) {
++            final Boolean ansi = ansiFromEnv(System.getenv());
++            if (ansi != null) {
++                System.setProperty(ANSI_PROPERTY, ansi.toString());
++            }
++        }
++    }
++
++    /**
++     * Color on or off from the environment for {@code terminal.ansi}, which TerminalConsoleAppender reads: {@code NO_COLOR}
++     * (no-color.org) turns it off, {@code FORCE_COLOR} turns it on without a TTY, and so does a Pterodactyl container
++     * ({@code P_SERVER_UUID}): its console renders ANSI but is not a TTY. {@code null} leaves the TTY check to TCA.
++     */
++    static Boolean ansiFromEnv(final Map<String, String> env) {
++        final String noColor = env.get("NO_COLOR");
++        if (noColor != null && !noColor.isEmpty()) {
++            return false;
++        }
++        final String forceColor = env.get("FORCE_COLOR");
++        if (forceColor != null) {
++            return !forceColor.equals("0") && !forceColor.equalsIgnoreCase("false");
++        }
++        return env.containsKey("P_SERVER_UUID") ? Boolean.TRUE : null;
+     }
+ 
+     static String resolve(final String raw) {
+diff --git a/src/main/resources/log4j2.xml b/src/main/resources/log4j2.xml
+index 4af1ed5c822545162f73efa2067e456e44fb1722..e4dfc0e09ed6b7f85350969572966e9254dde8eb 100644
+--- a/src/main/resources/log4j2.xml
++++ b/src/main/resources/log4j2.xml
+@@ -21,11 +21,11 @@
+             <DefaultArbiter>
+                 <TerminalConsole name="TerminalConsole">
+                     <PatternLayout>
+-                        <LoggerNamePatternSelector defaultPattern="%highlightError{%d{HH:mm:ss} %-5level [%logger] %msg%n%xEx{full}}">
++                        <LoggerNamePatternSelector defaultPattern="%tesseraStyle{%d{HH:mm:ss}}{time} %tesseraStyle{%-5level}{level} %tesseraStyle{[%logger]}{logger} %highlightError{%msg%n%xEx{full}}">
+                             <!-- Log root, Minecraft, Mojang and Bukkit loggers without prefix -->
+                             <!-- Disable prefix for various plugins that bypass the plugin logger -->
+                             <PatternMatch key=",net.minecraft.,Minecraft,com.mojang.,com.sk89q.,ru.tehkode.,Minecraft.AWE"
+-                                          pattern="%highlightError{%d{HH:mm:ss} %-5level %msg%n%xEx{full}}" />
++                                          pattern="%tesseraStyle{%d{HH:mm:ss}}{time} %tesseraStyle{%-5level}{level} %highlightError{%msg%n%xEx{full}}" />
+                         </LoggerNamePatternSelector>
+                     </PatternLayout>
+                 </TerminalConsole>

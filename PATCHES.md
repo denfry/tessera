@@ -27,6 +27,7 @@ patches are not listed here.
 | [0007-Make-the-player-visibility-map-thread-safe](folia-server/paper-patches/features/0007-Make-the-player-visibility-map-thread-safe.patch) | API | `hidePlayer`/`showPlayer` state is safe across regions | [#406](https://github.com/PaperMC/Folia/issues/406) |
 | [0008-Make-the-mob-goal-type-cache-thread-safe](folia-server/paper-patches/features/0008-Make-the-mob-goal-type-cache-thread-safe.patch) | API | Mob goal API no longer races on its type cache | [#522](https://github.com/PaperMC/Folia/pull/522) |
 | [0014-Add-console-log-style-switch](folia-server/paper-patches/features/0014-Add-console-log-style-switch.patch) | logging, config | Console log style from `-Dtessera.log.style` / `TESSERA_LOG_STYLE`: `pretty` (default, aligned level, no brackets) or `classic` (Paper format byte for byte). `logs/latest.log` is unchanged | — |
+| [0015-Color-the-pretty-console-style](folia-server/paper-patches/features/0015-Color-the-pretty-console-style.patch) | logging | `pretty` console colors: gray time, colored level, a stable color per plugin tag, 16 ANSI colors only. `NO_COLOR` / `FORCE_COLOR` and Pterodactyl (`P_SERVER_UUID`) set `terminal.ansi` when it is not given | — |
 
 Build branding: the server reports itself as **Tessera** (`Brand-Name`, `/version`). `Brand-Id` stays
 `papermc:folia` so plugins that check for Folia keep working.
