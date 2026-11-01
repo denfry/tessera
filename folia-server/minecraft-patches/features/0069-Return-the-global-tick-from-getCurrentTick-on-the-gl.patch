@@ -1,0 +1,27 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sun, 1 Nov 2026 09:09:32 +0300
+Subject: [PATCH] Return the global tick from getCurrentTick on the global
+ thread
+
+Plugins in compatibility mode run their sync tasks on the global region
+thread. Bukkit.getCurrentTick() only looked at the current region, so it
+threw "No currently ticking region" there and a repeating task that reads
+the tick failed every tick. The global tick has its own counter, use it.
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 46751b44278961c5080bf3008f32e1471525b40e..036ec932f3624d25b7821cba79127161f3a8aa0a 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -141,6 +141,11 @@ public final class RegionizedServer {
+             if (TickThread.isShutdownThread()) {
+                 return 0L;
+             }
++            // Tessera start - the global tick has its own tick count, compat plugin tasks run on it
++            if (isGlobalTickThread()) {
++                return INSTANCE.tickHandle.getCurrentTick();
++            }
++            // Tessera end - the global tick has its own tick count, compat plugin tasks run on it
+             throw new IllegalStateException("No currently ticking region");
+         }
+         return region.getData().getCurrentTick();

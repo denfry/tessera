@@ -1,0 +1,28 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sun, 1 Nov 2026 09:29:07 +0300
+Subject: [PATCH] Borrow the region when a compat plugin spawns an entity
+
+ServerLevel#addEntity reads the region data before any thread check runs,
+so a task of a plugin in compatibility mode, which runs on the global
+thread, failed with a NullPointerException on World#spawn unless an
+earlier call in the same task had already borrowed that region. Check the
+thread first, which borrows the region inside a loan scope. Nothing
+changes outside the scope.
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index 9ae85d7f5d506cf4a0e8d216de7e4dc885b00c27..c7a4e31be6b38d53c64944e48e53cc272e410393 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -1764,6 +1764,11 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     // CraftBukkit start
+     private boolean addEntity(final Entity entity, final org.bukkit.event.entity.CreatureSpawnEvent.@Nullable SpawnReason spawnReason) {
+         org.spigotmc.AsyncCatcher.catchOp("entity add"); // Spigot
++        // Tessera start - adding an entity reads the region data before any thread check would borrow the region
++        if (io.papermc.paper.threadedregions.TesseraRegionLoan.isInScope()) {
++            ca.spottedleaf.moonrise.common.util.TickThread.ensureTickThread(this, entity.chunkPosition().x(), entity.chunkPosition().z(), "Cannot add entity off the owning region");
++        }
++        // Tessera end - adding an entity reads the region data before any thread check would borrow the region
+         entity.generation = false; // Paper - Don't fire sync event during generation; Reset flag if it was added during a ServerLevel generation process
+         // Paper start - extra debug info
+         if (entity.valid) {

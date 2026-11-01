@@ -1,0 +1,95 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sun, 1 Nov 2026 23:14:55 +0300
+Subject: [PATCH] Award stats and criteria on the thread of the player
+
+The owner of a cloud, primed TNT or evoker fangs can be in another region
+when the victim is hurt or dies, and lightning triggers criteria for every
+player within 256 blocks. Those writes raced with the player's own region
+on the stats and advancement data, which are plain collections.
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index 82489277909b5ea277754b4ba1fe90778aa50539..f6efc60a839511587cc8c59db19bff8c88a44f3a 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -1446,6 +1446,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+ 
+     @Override
+     public void awardKillScore(final Entity victim, final DamageSource killingBlow) {
++        // Tessera start - the killer can be in another region
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            this.getBukkitEntity().taskScheduler.schedule((ServerPlayer player) -> player.awardKillScore(victim, killingBlow), null, 1L);
++            return;
++        }
++        // Tessera end - the killer can be in another region
+         if (victim != this) {
+             super.awardKillScore(victim, killingBlow);
+             Scoreboard scoreboard = this.level().getScoreboard();
+@@ -2668,6 +2674,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+ 
+     @Override
+     public void awardStat(final Stat<?> stat, final int count) {
++        // Tessera start - the stats of a player belong to the player's thread
++        if (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this)) {
++            this.getBukkitEntity().taskScheduler.schedule((ServerPlayer player) -> player.awardStat(stat, count), null, 1L);
++            return;
++        }
++        // Tessera end - the stats of a player belong to the player's thread
+         this.stats.increment(this, stat, count);
+         this.level().getCraftServer().getScoreboardManager().forAllObjectives(stat, this, score -> score.add(count)); // CraftBukkit - Get our scores instead
+     }
+diff --git a/net/minecraft/world/entity/LightningBolt.java b/net/minecraft/world/entity/LightningBolt.java
+index c756d28b396520264336832f17527981248556f3..7447341947de9ef412b09aa809b12eb1ef197005 100644
+--- a/net/minecraft/world/entity/LightningBolt.java
++++ b/net/minecraft/world/entity/LightningBolt.java
+@@ -129,7 +129,7 @@ public class LightningBolt extends Entity {
+                         );
+ 
+                     for (ServerPlayer player : ((ServerLevel)this.level()).getPlayers(playerx -> playerx.distanceTo(this) < 256.0F)) {
+-                        CriteriaTriggers.LIGHTNING_STRIKE.trigger(player, this, viewers);
++                        player.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer viewer) -> CriteriaTriggers.LIGHTNING_STRIKE.trigger(viewer, this, viewers)); // Tessera - the player can be in another region
+                     }
+                 }
+ 
+@@ -159,7 +159,7 @@ public class LightningBolt extends Entity {
+ 
+                 this.hitEntities.addAll(entities);
+                 if (this.cause != null) {
+-                    CriteriaTriggers.CHANNELED_LIGHTNING.trigger(this.cause, entities);
++                    this.cause.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer channeler) -> CriteriaTriggers.CHANNELED_LIGHTNING.trigger(channeler, entities)); // Tessera - the player can be in another region
+                 }
+             }
+         }
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 6923d5cd25c9cca197a758cf233d302885da08c6..8c7cd649c3f3e70c9cb48fe86006ddc30adafb7c 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -1582,7 +1582,13 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         }
+ 
+         if (source.getEntity() instanceof ServerPlayer sourcePlayer) {
+-            CriteriaTriggers.PLAYER_HURT_ENTITY.trigger(sourcePlayer, this, source, originalDamage, damage, blocked);
++            // Tessera start - the source of the damage can be in another region
++            final DamageSource hurtSource = source;
++            final float dealt = originalDamage;
++            final float taken = damage;
++            final boolean wasBlocked = blocked;
++            sourcePlayer.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer player) -> CriteriaTriggers.PLAYER_HURT_ENTITY.trigger(player, this, hurtSource, dealt, taken, wasBlocked));
++            // Tessera end - the source of the damage can be in another region
+         }
+ 
+         return success;
+@@ -2599,7 +2605,12 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+                     }
+ 
+                     if (source.getEntity() instanceof ServerPlayer sourcePlayer) {
+-                        CriteriaTriggers.PLAYER_HURT_ENTITY.trigger(sourcePlayer, this, source, originalDamage, dmg, true); // Paper - fix taken/dealt param order
++                        // Tessera start - the source of the damage can be in another region
++                        final DamageSource hurtSource = source;
++                        final float dealt = originalDamage;
++                        final float taken = dmg;
++                        sourcePlayer.getBukkitEntity().taskScheduler.scheduleOrExecute((ServerPlayer player) -> CriteriaTriggers.PLAYER_HURT_ENTITY.trigger(player, this, hurtSource, dealt, taken, true)); // Paper - fix taken/dealt param order
++                        // Tessera end - the source of the damage can be in another region
+                     }
+ 
+                     return !io.papermc.paper.configuration.GlobalConfiguration.get().unsupportedSettings.skipVanillaDamageTickWhenShieldBlocked; // Paper - this should always return true, however expose an unsupported setting to flip this to false to enable "shield stunning".

@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sat, 31 Oct 2026 12:39:01 +0300
+Subject: [PATCH] Save all regions from the management server
+
+server/save runs on the global tick, where saveEverything sees no
+current region. Every player and chunk was skipped and the call still
+reported success. Queue the save of chunks and players on each region.
+The result now says the saves were queued.
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 352d799e08bb37a390a0c439015e87f1bb63f55e..3efd6fdf76015d5ac07df309eaaee49c3682ec80 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -979,6 +979,33 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+         return result;
+     }
+ 
++    // Tessera start - save from the global tick
++    /**
++     * Saves global data and worlds, and queues a save of the chunks and players of every region, which only the
++     * region itself can do. Returns once the saves are queued; {@code false} if a region could not take its save.
++     */
++    public boolean tesseraSaveEverythingRegionised(final boolean flush, final boolean force) {
++        boolean queued = this.saveAllChunks(true, flush, force);
++        for (final ServerLevel level : this.getAllLevels()) {
++            final List<io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData>> regions = new java.util.ArrayList<>();
++            level.regioniser.computeForAllRegions(regions::add);
++            for (final io.papermc.paper.threadedregions.ThreadedRegionizer.ThreadedRegion<io.papermc.paper.threadedregions.TickRegions.TickRegionData, io.papermc.paper.threadedregions.TickRegions.TickRegionSectionData> region : regions) {
++                final net.minecraft.world.level.ChunkPos center = region.getCenterChunk();
++                if (center == null) {
++                    continue;
++                }
++                queued &= io.papermc.paper.threadedregions.RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(level, center.x(), center.z(), () -> {
++                    this.getPlayerList().saveAll();
++                    if (force || !level.noSave) {
++                        level.getChunkSource().save(flush);
++                    }
++                }) != null;
++            }
++        }
++        return queued;
++    }
++    // Tessera end - save from the global tick
++
+     public void saveGlobalData(final boolean flush) {
+         this.scoreboard.storeToSaveDataIfDirty(this.getDataStorage().computeIfAbsent(ScoreboardSaveData.TYPE));
+         // Paper end - split out global level data
+diff --git a/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java b/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
+index be6db3be2353a97d66c1cafc4e98032610220d28..91e767b2576fc0651c72183b91df932eac4e3b76 100644
+--- a/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
++++ b/net/minecraft/server/jsonrpc/internalapi/MinecraftServerStateServiceImpl.java
+@@ -34,7 +34,7 @@ public class MinecraftServerStateServiceImpl implements MinecraftServerStateServ
+     @Override
+     public boolean saveEverything(final boolean suppressLogs, final boolean flush, final boolean force, final ClientInfo clientInfo) {
+         this.jsonrpcLogger.log(clientInfo, "Save everything. SuppressLogs: {}, flush: {}, force: {}", suppressLogs, flush, force);
+-        return this.server().saveEverything(suppressLogs, flush, force);
++        return this.server().tesseraSaveEverythingRegionised(flush, force); // Tessera - saveEverything only sees the current region, and there is none on the global tick
+     }
+ 
+     @Override

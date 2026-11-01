@@ -1,0 +1,189 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Sat, 31 Oct 2026 11:32:58 +0300
+Subject: [PATCH] Find entity viewer changes off the region thread
+
+With every player in one region the tracker checks every player against every entity each tick, and almost every check changes nothing. With performance.async-entity-tracker the check runs read-only on a pool while the region thread waits, so the state it reads does not change. Entities with a change run the usual update on the region thread, so adding and removing viewers, events and packets stay there. Regions with fewer than 10000 entity and player pairs do not use the pool.
+
+diff --git a/net/minecraft/server/level/ChunkMap.java b/net/minecraft/server/level/ChunkMap.java
+index 71c700ef3bb42dd675c33051994fe12f27e57ef1..a37840b04e1eae4301cdb67a208c61cb7238282c 100644
+--- a/net/minecraft/server/level/ChunkMap.java
++++ b/net/minecraft/server/level/ChunkMap.java
+@@ -1110,6 +1110,31 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+     }
+     // Tessera end - update the viewers of stationary entities less often
+ 
++    // Tessera start - find viewer changes off the region thread
++    private static final int ASYNC_TRACKER_MIN_PAIRS = 10_000;
++    private static final int ASYNC_TRACKER_BATCH = 32;
++
++    // the region thread waits for the pool, so nothing the workers read changes under them
++    private boolean @Nullable [] findViewerChanges(final Entity[] entities, final int count, final ca.spottedleaf.moonrise.common.misc.NearbyPlayers nearbyPlayers, final List<ServerPlayer> players) {
++        if (!io.papermc.paper.threadedregions.TesseraCompat.asyncEntityTracker() || (long)count * players.size() < ASYNC_TRACKER_MIN_PAIRS) {
++            return null;
++        }
++        final Set<ServerPlayer> localPlayers = new it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet<>(players);
++        final boolean[] changed = new boolean[count];
++        io.papermc.paper.threadedregions.TesseraTrackerPool.forEach(count, ASYNC_TRACKER_BATCH, i -> {
++            try {
++                final Entity entity = entities[i];
++                final ChunkMap.TrackedEntity tracker = ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity)entity).moonrise$getTrackedEntity();
++                changed[i] = tracker != null && tracker.hasViewerChanges(nearbyPlayers.getChunk(entity.chunkPosition()), localPlayers);
++            } catch (final RuntimeException ex) {
++                changed[i] = true; // the region thread does the full update
++                io.papermc.paper.threadedregions.TesseraTrackerPool.reportFailure(ex);
++            }
++        });
++        return changed;
++    }
++    // Tessera end - find viewer changes off the region thread
++
+     private void newTrackerTick() {
+         // Folia start - profiler
+         final ca.spottedleaf.leafprofiler.RegionizedProfiler.Handle profiler = io.papermc.paper.threadedregions.TickRegionScheduler.getProfiler();
+@@ -1123,13 +1148,14 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+         try {
+             final ca.spottedleaf.moonrise.common.list.ReferenceList<net.minecraft.world.entity.Entity> trackerEntities = worldData.trackerEntities; // Folia - region threading
+             final Entity[] trackerEntitiesRaw = trackerEntities.getRawDataUnchecked();
++            final boolean[] viewerChanges = this.findViewerChanges(trackerEntitiesRaw, trackerEntities.size(), nearbyPlayers, worldData.getLocalPlayers()); // Tessera - find viewer changes off the region thread
+             for (int i = 0, len = totalEntities = trackerEntities.size(); i < len; ++i) { // Folia - region profiler
+                 final Entity entity = trackerEntitiesRaw[i];
+                 final ChunkMap.TrackedEntity tracker = ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerEntity)entity).moonrise$getTrackedEntity();
+                 if (tracker == null) {
+                     continue;
+                 }
+-                if (!this.skipTrackerUpdate(entity)) // Tessera - update the viewers of stationary entities less often
++                if ((viewerChanges == null || viewerChanges[i]) && !this.skipTrackerUpdate(entity)) // Tessera - update the viewers of stationary entities less often // Tessera - find viewer changes off the region thread
+                 ((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$tick(nearbyPlayers.getChunk(entity.chunkPosition())); // Folia - region threading
+                 if (((ca.spottedleaf.moonrise.patches.entity_tracker.EntityTrackerTrackedEntity)tracker).moonrise$hasPlayers()
+                     || ((ca.spottedleaf.moonrise.patches.chunk_system.entity.ChunkSystemEntity)entity).moonrise$getChunkStatus().isOrAfter(FullChunkStatus.ENTITY_TICKING)) {
+@@ -1306,6 +1332,44 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+             }
+         }
+ 
++        // Tessera start - find viewer changes off the region thread
++        // Read-only version of moonrise$tick, runs off the region thread. Only this entity's fields are written.
++        public boolean hasViewerChanges(final ca.spottedleaf.moonrise.common.misc.NearbyPlayers.@Nullable TrackedChunk chunk, final Set<ServerPlayer> localPlayers) {
++            if (chunk == null) {
++                return true;
++            }
++
++            final ca.spottedleaf.moonrise.common.list.ReferenceList<ServerPlayer> players = chunk.getPlayers(ca.spottedleaf.moonrise.common.misc.NearbyPlayers.NearbyMapType.VIEW_DISTANCE);
++
++            if (players == null) {
++                return true;
++            }
++
++            final ServerPlayer[] playersRaw = players.getRawDataUnchecked();
++
++            for (int i = 0, len = players.size(); i < len; ++i) {
++                final ServerPlayer player = playersRaw[i];
++                if (player != this.entity
++                    && (localPlayers.contains(player) && this.isVisibleTo(player)) != this.seenBy.contains(player.connection)) {
++                    return true;
++                }
++            }
++
++            final long currChunkUpdate = chunk.getUpdateCount();
++            if (this.lastChunkUpdate != currChunkUpdate || this.lastTrackedChunk != chunk) {
++                for (final ServerPlayerConnection conn : this.seenBy) {
++                    if (!players.contains(conn.getPlayer())) {
++                        return true;
++                    }
++                }
++                this.lastChunkUpdate = currChunkUpdate;
++                this.lastTrackedChunk = chunk;
++            }
++
++            return false;
++        }
++        // Tessera end - find viewer changes off the region thread
++
+         @Override
+         public final void moonrise$removeNonTickThreadPlayers() {
+             boolean foundToRemove = false;
+@@ -1407,38 +1471,7 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+         public void updatePlayer(final ServerPlayer player) {
+             org.spigotmc.AsyncCatcher.catchOp("player tracker update"); // Spigot
+             if (player != this.entity) {
+-                // Paper start - remove allocation of Vec3 here
+-                // Vec3 deltaToPlayer = player.position().subtract(this.entity.position());
+-                double deltaToPlayerX = player.getX() - this.entity.getX();
+-                double deltaToPlayerZ = player.getZ() - this.entity.getZ();
+-                // Paper end - remove allocation of Vec3 here
+-                int playerViewDistance = ChunkMap.this.getPlayerViewDistance(player);
+-                double visibleRange = Math.min(this.getEffectiveRange(), playerViewDistance * 16);
+-                double distanceSquared = deltaToPlayerX * deltaToPlayerX + deltaToPlayerZ * deltaToPlayerZ; // Paper
+-                double rangeSquared = visibleRange * visibleRange;
+-                // Paper start - Configurable entity tracking range by Y
+-                boolean visibleToPlayer = distanceSquared <= rangeSquared;
+-                if (visibleToPlayer && level.paperConfig().entities.trackingRangeY.enabled) {
+-                    double rangeY = level.paperConfig().entities.trackingRangeY.get(this.entity, -1);
+-                    if (rangeY != -1) {
+-                        double deltaToPlayerY = player.getY() - this.entity.getY();
+-                        visibleToPlayer = deltaToPlayerY * deltaToPlayerY <= rangeY * rangeY;
+-                    }
+-                }
+-                visibleToPlayer = visibleToPlayer
+-                    && this.entity.broadcastToPlayer(player)
+-                    && ChunkMap.this.isChunkTracked(player, this.entity.chunkPosition().x(), this.entity.chunkPosition().z());
+-                // Paper end - Configurable entity tracking range by Y
+-                // Folia start - region threading
+-                if (visibleToPlayer && (this.entity instanceof ServerPlayer thisEntity) && thisEntity.broadcastedDeath) {
+-                    visibleToPlayer = false;
+-                }
+-                // Folia end - region threading
+-                // CraftBukkit start - respect vanish API
+-                if (visibleToPlayer && (!ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player) || !player.getBukkitEntity().canSee(this.entity.getBukkitEntity()))) { // Paper - only consider hits // Folia - region threading
+-                    visibleToPlayer = false;
+-                }
+-                // CraftBukkit end
++                boolean visibleToPlayer = ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(player) && this.isVisibleTo(player); // Tessera - find viewer changes off the region thread
+                 if (visibleToPlayer) {
+                     if (this.seenBy.add(player.connection)) {
+                         // Paper start - entity tracking events
+@@ -1459,6 +1492,44 @@ public class ChunkMap extends SimpleRegionStorage implements ChunkHolder.PlayerP
+             }
+         }
+ 
++        // Tessera start - find viewer changes off the region thread
++        private boolean isVisibleTo(final ServerPlayer player) {
++            // Paper start - remove allocation of Vec3 here
++            // Vec3 deltaToPlayer = player.position().subtract(this.entity.position());
++            double deltaToPlayerX = player.getX() - this.entity.getX();
++            double deltaToPlayerZ = player.getZ() - this.entity.getZ();
++            // Paper end - remove allocation of Vec3 here
++            int playerViewDistance = ChunkMap.this.getPlayerViewDistance(player);
++            double visibleRange = Math.min(this.getEffectiveRange(), playerViewDistance * 16);
++            double distanceSquared = deltaToPlayerX * deltaToPlayerX + deltaToPlayerZ * deltaToPlayerZ; // Paper
++            double rangeSquared = visibleRange * visibleRange;
++            // Paper start - Configurable entity tracking range by Y
++            boolean visibleToPlayer = distanceSquared <= rangeSquared;
++            if (visibleToPlayer && level.paperConfig().entities.trackingRangeY.enabled) {
++                double rangeY = level.paperConfig().entities.trackingRangeY.get(this.entity, -1);
++                if (rangeY != -1) {
++                    double deltaToPlayerY = player.getY() - this.entity.getY();
++                    visibleToPlayer = deltaToPlayerY * deltaToPlayerY <= rangeY * rangeY;
++                }
++            }
++            visibleToPlayer = visibleToPlayer
++                && this.entity.broadcastToPlayer(player)
++                && ChunkMap.this.isChunkTracked(player, this.entity.chunkPosition().x(), this.entity.chunkPosition().z());
++            // Paper end - Configurable entity tracking range by Y
++            // Folia start - region threading
++            if (visibleToPlayer && (this.entity instanceof ServerPlayer thisEntity) && thisEntity.broadcastedDeath) {
++                visibleToPlayer = false;
++            }
++            // Folia end - region threading
++            // CraftBukkit start - respect vanish API
++            if (visibleToPlayer && !player.getBukkitEntity().canSeeOffThread(this.entity)) { // Paper - only consider hits
++                visibleToPlayer = false;
++            }
++            // CraftBukkit end
++            return visibleToPlayer;
++        }
++        // Tessera end - find viewer changes off the region thread
++
+         private int scaledRange(final int range) {
+             return ChunkMap.this.level.getServer().getScaledTrackingDistance(range);
+         }

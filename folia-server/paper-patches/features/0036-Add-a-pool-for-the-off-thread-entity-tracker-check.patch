@@ -1,0 +1,167 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <aseraw115@gmail.com>
+Date: Sat, 31 Oct 2026 11:32:57 +0300
+Subject: [PATCH] Add a pool for the off-thread entity tracker check
+
+Adds performance.async-entity-tracker to config/tessera.yml (default false) with a small pool the region thread shares the work with. The region thread takes batches itself, so a busy pool costs nothing, and it spins until no worker is inside a batch. CraftPlayer gets a canSee that does not go through getHandle, which is bound to the owning thread.
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index 56b0c87d457f6bb98b0c613b34971f87f03e58ad..fb72c0a5561e2f2d90c587acc80853a112563ee5 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -65,6 +65,12 @@ public final class TesseraCompat {
+           distant-mob-ai-start-distance: 12
+           distant-mob-ai-max-interval: 20
+           distant-mob-ai-exclude: []
++          # Regions with many players and entities close together find out which entities gained or lost a viewer
++          # on a small thread pool, and the region waits for it. Only the check moves: adding and removing viewers
++          # and sending packets stay on the region thread. async-entity-tracker-threads 0 picks a quarter of the
++          # CPU threads, at most 4.
++          async-entity-tracker: false
++          async-entity-tracker-threads: 0
+         """;
+ 
+     private static volatile Set<String> plugins = Set.of();
+@@ -76,6 +82,8 @@ public final class TesseraCompat {
+     private static volatile double distantMobAiStartDistanceSquared = 144.0;
+     private static volatile int distantMobAiMaxInterval = 20;
+     private static volatile Set<String> distantMobAiExcluded = Set.of();
++    private static volatile boolean asyncEntityTracker;
++    private static volatile int asyncEntityTrackerThreads;
+ 
+     private TesseraCompat() {
+     }
+@@ -135,6 +143,10 @@ public final class TesseraCompat {
+                 }
+                 distantMobAiExcluded = Set.copyOf(excluded);
+                 distantMobAi = Boolean.TRUE.equals(performance.get("distant-mob-ai"));
++                asyncEntityTracker = Boolean.TRUE.equals(performance.get("async-entity-tracker"));
++                if (performance.get("async-entity-tracker-threads") instanceof Number threads) {
++                    asyncEntityTrackerThreads = threads.intValue();
++                }
+             }
+         } catch (final IOException | YAMLException ex) {
+             LOGGER.error("Could not read {}, compatibility mode is off", file, ex);
+@@ -156,6 +168,14 @@ public final class TesseraCompat {
+         return lightEntityTrackerInterval;
+     }
+ 
++    public static boolean asyncEntityTracker() {
++        return asyncEntityTracker;
++    }
++
++    public static int asyncEntityTrackerThreads() {
++        return asyncEntityTrackerThreads;
++    }
++
+     public static boolean distantMobAi() {
+         return distantMobAi;
+     }
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraTrackerPool.java b/src/main/java/io/papermc/paper/threadedregions/TesseraTrackerPool.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..060f1d6b3ff3ff92e3ab626445ecd0314dde47e1
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraTrackerPool.java
+@@ -0,0 +1,85 @@
++package io.papermc.paper.threadedregions;
++
++import com.mojang.logging.LogUtils;
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.atomic.AtomicBoolean;
++import java.util.concurrent.atomic.AtomicInteger;
++import java.util.function.IntConsumer;
++import org.slf4j.Logger;
++
++/**
++ * Pool that helps a region thread with read-only entity tracker work. The region thread works through the batches
++ * itself, so a busy pool slows nothing down, and it returns only when no worker is still inside a batch.
++ */
++public final class TesseraTrackerPool {
++
++    private static final Logger LOGGER = LogUtils.getClassLogger();
++    private static final AtomicBoolean FAILURE_REPORTED = new AtomicBoolean();
++    private static final int THREADS = threads();
++    private static final AtomicInteger THREAD_ID = new AtomicInteger();
++    private static final ExecutorService POOL = Executors.newFixedThreadPool(THREADS, task -> {
++        final Thread thread = new Thread(task, "Tessera Tracker Thread #" + THREAD_ID.incrementAndGet());
++        thread.setDaemon(true);
++        return thread;
++    });
++
++    private TesseraTrackerPool() {
++    }
++
++    private static int threads() {
++        final int configured = TesseraCompat.asyncEntityTrackerThreads();
++        return configured > 0 ? configured : Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors() / 4));
++    }
++
++    /**
++     * Runs {@code action} for every index below {@code count}, in batches, on the calling thread and the pool.
++     * {@code action} must not throw.
++     */
++    public static void forEach(final int count, final int batchSize, final IntConsumer action) {
++        final AtomicInteger nextIndex = new AtomicInteger();
++        final AtomicInteger workers = new AtomicInteger(); // workers inside a batch; negative once the call is over
++        final Runnable batches = () -> {
++            int start;
++            while ((start = nextIndex.getAndAdd(batchSize)) < count) {
++                for (int i = start, end = Math.min(count, start + batchSize); i < end; ++i) {
++                    action.accept(i);
++                }
++            }
++        };
++
++        final int helpers = Math.min(THREADS, (count - 1) / batchSize);
++        for (int i = 0; i < helpers; ++i) {
++            POOL.execute(() -> {
++                int current;
++                do {
++                    current = workers.get();
++                    if (current < 0) {
++                        return; // queued behind other regions until the work was already done
++                    }
++                } while (!workers.compareAndSet(current, current + 1));
++                try {
++                    batches.run();
++                } finally {
++                    workers.decrementAndGet();
++                }
++            });
++        }
++
++        batches.run();
++
++        workers.addAndGet(Integer.MIN_VALUE);
++        while (workers.get() != Integer.MIN_VALUE) {
++            Thread.onSpinWait(); // batches are short, and parking can take milliseconds on Windows
++        }
++    }
++
++    /**
++     * Logs the first failed check. The entity falls back to the full update on the region thread.
++     */
++    public static void reportFailure(final RuntimeException ex) {
++        if (FAILURE_REPORTED.compareAndSet(false, true)) {
++            LOGGER.error("Entity tracker check failed off the region thread, further failures are not logged", ex);
++        }
++    }
++}
+diff --git a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+index 882f9a66e12b161e4f63e328ae686095ae907ed7..5ccf8707eac34c9d4e4c9b3e501fc891d793ba56 100644
+--- a/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
++++ b/src/main/java/org/bukkit/craftbukkit/entity/CraftPlayer.java
+@@ -2113,6 +2113,12 @@ public class CraftPlayer extends CraftHumanEntity implements Player, PluginMessa
+         return this.equals(entity) || entity.isVisibleByDefault() ^ this.invertedVisibilityEntities.containsKey(entity.getUniqueId()); // SPIGOT-7312: Can always see self
+     }
+ 
++    // Tessera start - find viewer changes off the region thread
++    public boolean canSeeOffThread(net.minecraft.world.entity.Entity entity) {
++        return entity.visibleByDefault ^ this.invertedVisibilityEntities.containsKey(entity.getUUID());
++    }
++    // Tessera end - find viewer changes off the region thread
++
+     public boolean canSeePlayer(UUID uuid) {
+         org.bukkit.entity.Entity entity = this.getServer().getPlayer(uuid);
+ 

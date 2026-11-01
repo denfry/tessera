@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sun, 1 Nov 2026 23:14:57 +0300
+Subject: [PATCH] Move fast projectiles out of the region through a teleport
+
+Projectiles move with setPos instead of Entity#move, so one leaving its
+region in a single tick still failed the thread check and was discarded.
+A teleport that fails now stops the entity, which used to stay in place
+and schedule a new teleport every tick.
+
+diff --git a/net/minecraft/world/entity/Entity.java b/net/minecraft/world/entity/Entity.java
+index 4dcc06f4b168bde8a9b68a79f5308618d56550d3..6384f8ebfc5b13a9d0f45e5d594ba9adbb0a3f2f 100644
+--- a/net/minecraft/world/entity/Entity.java
++++ b/net/minecraft/world/entity/Entity.java
+@@ -4591,17 +4591,23 @@ public abstract class Entity
+     // Tessera start - move out of the region through a teleport
+     // An entity fast enough to cross the gap between regions in one move (plugin velocity, explosions) cannot be moved
+     // from this thread: the thread check would discard it. Teleport it on its next tick instead.
+-    private boolean tesseraMoveOutOfRegion(final Vec3 delta) {
++    protected boolean tesseraMoveOutOfRegion(final Vec3 delta) {
+         if (delta.lengthSqr() < 30.0 * 30.0 || this.isPassenger() || !delta.isFinite()
+             || ca.spottedleaf.moonrise.common.util.TickThread.isTickThreadFor(this.level(), this.position(), delta, 0)) {
+             return false;
+         }
+         final Vec3 to = this.position().add(delta);
+-        this.getBukkitEntity().taskScheduler.schedule((Entity entity) -> entity.teleportAsync(
+-            (ServerLevel)entity.level(), to, Float.valueOf(entity.getYRot()), Float.valueOf(entity.getXRot()), entity.getDeltaMovement(),
+-            org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN,
+-            TELEPORT_FLAG_LOAD_CHUNK | TELEPORT_FLAG_TELEPORT_PASSENGERS | TELEPORT_FLAG_NO_EVENT, null
+-        ), null, 1L);
++        this.getBukkitEntity().taskScheduler.schedule((Entity entity) -> {
++            final boolean moved = entity.teleportAsync(
++                (ServerLevel)entity.level(), to, Float.valueOf(entity.getYRot()), Float.valueOf(entity.getXRot()), entity.getDeltaMovement(),
++                org.bukkit.event.player.PlayerTeleportEvent.TeleportCause.UNKNOWN,
++                TELEPORT_FLAG_LOAD_CHUNK | TELEPORT_FLAG_TELEPORT_PASSENGERS | TELEPORT_FLAG_NO_EVENT, null
++            );
++            if (!moved) {
++                // out of bounds or dying: with the same velocity this would schedule a new teleport every tick
++                entity.setDeltaMovement(Vec3.ZERO);
++            }
++        }, null, 1L);
+         return true;
+     }
+     // Tessera end - move out of the region through a teleport
+diff --git a/net/minecraft/world/entity/projectile/ThrowableProjectile.java b/net/minecraft/world/entity/projectile/ThrowableProjectile.java
+index e131cd7180b5310f2b4392f0d547f112967b17b4..10519fea93722a83cf9596a5863012b1ce77a3e2 100644
+--- a/net/minecraft/world/entity/projectile/ThrowableProjectile.java
++++ b/net/minecraft/world/entity/projectile/ThrowableProjectile.java
+@@ -50,6 +50,7 @@ public abstract class ThrowableProjectile extends Projectile {
+         this.handleFirstTickBubbleColumn();
+         this.applyGravity();
+         this.applyInertia();
++        if (this.tesseraMoveOutOfRegion(this.getDeltaMovement())) return; // Tessera - move out of the region through a teleport
+         HitResult result = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity);
+         Vec3 newPosition;
+         if (result.getType() != HitResult.Type.MISS) {
+diff --git a/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java b/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
+index 89a67fa2d9e9939f77b2311f53624c0fb2f2db93..ac55ddb3fbe300feb39f71943fa6994de0f969a0 100644
+--- a/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
++++ b/net/minecraft/world/entity/projectile/arrow/AbstractArrow.java
+@@ -269,6 +269,7 @@ public abstract class AbstractArrow extends Projectile {
+             this.setXRot(lerpRotation(this.getXRot(), xRot));
+             this.setYRot(lerpRotation(this.getYRot(), yRot));
+             this.checkLeftOwner();
++            if (this.tesseraMoveOutOfRegion(movement)) return; // Tessera - move out of the region through a teleport
+             if (physicsEnabled) {
+                 BlockHitResult blockHitResult = this.level()
+                     .clipIncludingBorder(
+diff --git a/net/minecraft/world/entity/projectile/hurtingprojectile/AbstractHurtingProjectile.java b/net/minecraft/world/entity/projectile/hurtingprojectile/AbstractHurtingProjectile.java
+index fd11a2f4c7d0e35fdeccac9145d00ae808095558..77a8c636e6b46f8d26df015703aaa2e2a5d8cc1d 100644
+--- a/net/minecraft/world/entity/projectile/hurtingprojectile/AbstractHurtingProjectile.java
++++ b/net/minecraft/world/entity/projectile/hurtingprojectile/AbstractHurtingProjectile.java
+@@ -77,6 +77,7 @@ public abstract class AbstractHurtingProjectile extends Projectile {
+         Entity owner = this.getOwner();
+         this.applyInertia();
+         if (this.level().isClientSide() || (owner == null || !owner.isRemoved()) && this.level().hasChunkAt(this.blockPosition())) {
++            if (this.tesseraMoveOutOfRegion(this.getDeltaMovement())) return; // Tessera - move out of the region through a teleport
+             HitResult hitResult = ProjectileUtil.getHitResultOnMoveVector(this, this::canHitEntity, this.getClipType());
+             Vec3 newPosition;
+             if (hitResult.getType() != HitResult.Type.MISS) {

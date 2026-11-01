@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sat, 31 Oct 2026 12:39:01 +0300
+Subject: [PATCH] Do not share a random between regions in the trader spawner
+
+The spawner exists once per server and its random is a
+LegacyRandomSource, which throws when two threads draw at once. That
+failed the region and stopped the server. Use the random of the level
+like the other spawners. Region data now also carries the timer through
+merges and splits instead of starting it again.
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedWorldData.java b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+index bc3f8874d102e7f89105865522b252353a67db8e..69f386c3296f8b0230fb91b9e373045b3b8b0120 100644
+--- a/io/papermc/paper/threadedregions/RegionizedWorldData.java
++++ b/io/papermc/paper/threadedregions/RegionizedWorldData.java
+@@ -150,6 +150,7 @@ public final class RegionizedWorldData {
+             into.catSpawnerNextTick = Math.max(from.catSpawnerNextTick, into.catSpawnerNextTick);
+             into.patrolSpawnerNextTick = Math.max(from.patrolSpawnerNextTick, into.patrolSpawnerNextTick);
+             into.phantomSpawnerNextTick = Math.max(from.phantomSpawnerNextTick, into.phantomSpawnerNextTick);
++            if (into.wanderingTraderData == null) into.wanderingTraderData = from.wanderingTraderData; // Tessera - keep the wandering trader timer
+             // chunkHoldersToBroadcast
+             for (final ChunkHolder chunkHolder : from.chunkHoldersToBroadcast) {
+                 into.chunkHoldersToBroadcast.add(chunkHolder);
+@@ -304,6 +305,7 @@ public final class RegionizedWorldData {
+                 regionizedWorldData.catSpawnerNextTick = from.catSpawnerNextTick;
+                 regionizedWorldData.patrolSpawnerNextTick = from.patrolSpawnerNextTick;
+                 regionizedWorldData.phantomSpawnerNextTick = from.phantomSpawnerNextTick;
++                if (from.wanderingTraderData != null) regionizedWorldData.wanderingTraderData = from.wanderingTraderData.tesseraCopy(); // Tessera - keep the wandering trader timer
+                 regionizedWorldData.villageSiegeState = new VillageSiegeState(); // just re set it, as the spawn pos will be invalid
+             }
+             // chunkHoldersToBroadcast
+diff --git a/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java b/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
+index a5b6a5e742680b57d68d06d630d5207f45b8c6d2..16e5079d1247b4de66fcd4299bfdb613dfb019bc 100644
+--- a/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
++++ b/net/minecraft/world/entity/npc/wanderingtrader/WanderingTraderSpawner.java
+@@ -6,7 +6,6 @@ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.tags.BiomeTags;
+ import net.minecraft.util.Continuation;
+ import net.minecraft.util.Mth;
+-import net.minecraft.util.RandomSource;
+ import net.minecraft.world.entity.EntitySpawnReason;
+ import net.minecraft.world.entity.EntityTypes;
+ import net.minecraft.world.entity.SpawnPlacementType;
+@@ -30,7 +29,7 @@ public class WanderingTraderSpawner implements CustomSpawner {
+     private static final int SPAWN_CHANCE_INCREASE = 25;
+     private static final int SPAWN_ONE_IN_X_CHANCE = 10;
+     private static final int NUMBER_OF_SPAWN_ATTEMPTS = 10;
+-    private final RandomSource random = RandomSource.create();
++    // Tessera - use the random of the level, this spawner is shared by all regions
+     private final SavedDataStorage savedDataStorage;
+     // Folia - moved to global data
+ 
+@@ -60,7 +59,7 @@ public class WanderingTraderSpawner implements CustomSpawner {
+                     int chanceToSpawn = data.spawnChance();
+                     int newSpawnChance = Mth.clamp(chanceToSpawn + level.paperConfig().entities.spawning.wanderingTrader.spawnChanceFailureIncrement, level.paperConfig().entities.spawning.wanderingTrader.spawnChanceMin, level.paperConfig().entities.spawning.wanderingTrader.spawnChanceMax);
+                     data.setSpawnChance(newSpawnChance);
+-                    if (this.random.nextInt(100) <= chanceToSpawn) {
++                    if (level.getRandom().nextInt(100) <= chanceToSpawn) { // Tessera - use the random of the level
+                         if (this.spawn(level)) {
+                             data.setSpawnChance(level.paperConfig().entities.spawning.wanderingTrader.spawnChanceMin);
+                             // Paper end - Add Wandering Trader spawn rate config options
+@@ -86,7 +85,7 @@ public class WanderingTraderSpawner implements CustomSpawner {
+             return true;
+         }
+ 
+-        if (this.random.nextInt(10) != 0) {
++        if (level.getRandom().nextInt(10) != 0) { // Tessera - use the random of the level
+             return false;
+         }
+ 
+@@ -127,13 +126,13 @@ public class WanderingTraderSpawner implements CustomSpawner {
+         }
+     }
+ 
+-    private @Nullable BlockPos findSpawnPositionNear(final LevelReader level, final BlockPos referencePosition, final int radius) {
++    private @Nullable BlockPos findSpawnPositionNear(final ServerLevel level, final BlockPos referencePosition, final int radius) {
+         BlockPos spawnPosition = null;
+         SpawnPlacementType wanderingTraderSpawnType = SpawnPlacements.getPlacementType(EntityTypes.WANDERING_TRADER);
+ 
+         for (int i = 0; i < 10; i++) {
+-            int xPosition = referencePosition.getX() + this.random.nextInt(radius * 2) - radius;
+-            int zPosition = referencePosition.getZ() + this.random.nextInt(radius * 2) - radius;
++            int xPosition = referencePosition.getX() + level.getRandom().nextInt(radius * 2) - radius; // Tessera - use the random of the level
++            int zPosition = referencePosition.getZ() + level.getRandom().nextInt(radius * 2) - radius; // Tessera - use the random of the level
+             int yPosition = level.getHeight(SpawnPlacements.getHeightmapType(EntityTypes.WANDERING_TRADER), xPosition, zPosition);
+             BlockPos spawnPos = new BlockPos(xPosition, yPosition, zPosition);
+             if (wanderingTraderSpawnType.isSpawnPositionOk(level, spawnPos, EntityTypes.WANDERING_TRADER)) {
+diff --git a/net/minecraft/world/level/saveddata/WanderingTraderData.java b/net/minecraft/world/level/saveddata/WanderingTraderData.java
+index 60cc79dff0d2e3b808e881e673bb8133b49a832f..c7f35725a4cdfd2ecc455581cc162e0e72925d4f 100644
+--- a/net/minecraft/world/level/saveddata/WanderingTraderData.java
++++ b/net/minecraft/world/level/saveddata/WanderingTraderData.java
+@@ -29,6 +29,14 @@ public class WanderingTraderData extends SavedData {
+         this.spawnChance = spawnChance;
+     }
+ 
++    // Tessera start - keep the wandering trader timer
++    public WanderingTraderData tesseraCopy() {
++        final WanderingTraderData copy = new WanderingTraderData(this.spawnDelay, this.spawnChance);
++        copy.tickDelay = this.tickDelay;
++        return copy;
++    }
++    // Tessera end - keep the wandering trader timer
++
+     public int spawnDelay() {
+         return this.spawnDelay;
+     }

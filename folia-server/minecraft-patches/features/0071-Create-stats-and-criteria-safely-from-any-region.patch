@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sun, 1 Nov 2026 23:14:54 +0300
+Subject: [PATCH] Create stats and criteria safely from any region
+
+Region threads create a Stat the first time a block is mined or an item
+is used, so two regions could resize the same maps at once. A lost entry
+in the criteria cache breaks ObjectiveCriteria#byName until a restart.
+
+diff --git a/net/minecraft/stats/StatType.java b/net/minecraft/stats/StatType.java
+index 3c1d74c92948d550bd8d96e9603b743bb34ef2c5..a6926d40e39a3077aa89c7c759d23d5eb3fb8b77 100644
+--- a/net/minecraft/stats/StatType.java
++++ b/net/minecraft/stats/StatType.java
+@@ -11,7 +11,7 @@ import net.minecraft.network.codec.StreamCodec;
+ 
+ public class StatType<T> implements Iterable<Stat<T>> {
+     private final Registry<T> registry;
+-    private final Map<T, Stat<T>> map = new IdentityHashMap<>();
++    private final Map<T, Stat<T>> map = new java.util.concurrent.ConcurrentHashMap<>(); // Tessera - regions create stats on first use
+     private final Component displayName;
+     private final StreamCodec<RegistryFriendlyByteBuf, Stat<T>> streamCodec;
+ 
+diff --git a/net/minecraft/world/scores/criteria/ObjectiveCriteria.java b/net/minecraft/world/scores/criteria/ObjectiveCriteria.java
+index f77c5feac60e3919086c2c8b51653e83c277f0cc..d08658f1e7f0e3e4b949664ab2fddb76a69f9a04 100644
+--- a/net/minecraft/world/scores/criteria/ObjectiveCriteria.java
++++ b/net/minecraft/world/scores/criteria/ObjectiveCriteria.java
+@@ -16,8 +16,8 @@ import net.minecraft.util.StringRepresentable;
+ import net.minecraft.world.scores.TeamColor;
+ 
+ public class ObjectiveCriteria {
+-    private static final Map<String, ObjectiveCriteria> CUSTOM_CRITERIA = Maps.newHashMap();
+-    public static final Map<String, ObjectiveCriteria> CRITERIA_CACHE = Maps.newHashMap();
++    private static final Map<String, ObjectiveCriteria> CUSTOM_CRITERIA = new java.util.concurrent.ConcurrentHashMap<>(); // Tessera - regions create stats on first use
++    public static final Map<String, ObjectiveCriteria> CRITERIA_CACHE = new java.util.concurrent.ConcurrentHashMap<>(); // Tessera - regions create stats on first use
+     public static final Codec<ObjectiveCriteria> CODEC = Codec.STRING
+         .comapFlatMap(
+             name -> byName(name).map(DataResult::success).orElse(DataResult.error(() -> "No scoreboard criteria with name: " + name)),

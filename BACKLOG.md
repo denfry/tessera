@@ -72,14 +72,76 @@ Rest of the item about minor races (the rest is in "Done").
 - **Done when.** Checked with a real client: credits are shown once, after them the player is in the overworld, not in
   the End void.
 
+### Code audit of 2026-10-31
+
+Found by reading the code on 26.3 and traced through the sources. None of these has been reproduced on a running server
+yet, so step 1 of "How to take a task" applies to each.
+
+#### T-202 Stats are created lazily in unsynchronized maps
+- **Where.** `StatType#map` (`IdentityHashMap`, `computeIfAbsent` in `StatType#get`), `ObjectiveCriteria#CRITERIA_CACHE`
+  (static `HashMap`, written by the `Stat` constructor), `CUSTOM_CRITERIA`.
+- **Why.** Region threads create a `Stat` on first use (block mined, item used, entity killed), so two regions can resize
+  these maps at once. A lost entry in `CRITERIA_CACHE` breaks `ObjectiveCriteria#byName` until restart, including for
+  unrelated names such as `dummy`.
+- **Done when.** The maps are concurrent or all stats are created at startup. Check `CraftStatistic` and `CraftCriteria`.
+
+#### T-203 Changing recipes at runtime races with the regions
+- **Where.** `RecipeMap#addRecipe` / `removeRecipe` (plain `LinkedHashMultimap` and `LinkedHashMap`),
+  `RecipeManager#finalizeRecipeLoading`, `PlayerList#reloadResources`, `reloadAdvancementData`, `reloadRecipes`;
+  callers `CraftServer#addRecipe`, `removeRecipe`, `clearRecipes`, `updateRecipes`, `updateResources`, `RecipeIterator`,
+  `CraftMagicNumbers#loadAdvancement`.
+- **Why.** Two problems. A plugin writes the maps while furnaces in other regions read them; an exception from the stream
+  is caught in `LevelChunk` and removes the block entity. And `finalizeRecipeLoading` calls `reloadResources`, which runs
+  `PlayerAdvancements#reload` and `flushDirty` for every online player on the caller's thread, racing with their regions
+  and possibly losing progress. `reloadRecipes` likewise touches each player's recipe book.
+- **Done when.** Recipe data is swapped as an immutable snapshot, and per-player reloads run on each player's entity
+  scheduler. Upstream reference: [#498](https://github.com/PaperMC/Folia/pull/498).
+
+#### T-204 Region threads write to players in other regions
+- **Where.** `LivingEntity` death path (`sourceEntity.killedEntity`), `Player#killedEntity`, `ServerPlayer#awardStat`,
+  `ServerStatsCounter#dirty` (`HashSet`); `LightningBolt` (`LIGHTNING_STRIKE` for all players within 256 blocks through
+  `ServerLevel#getPlayers`, `CHANNELED_LIGHTNING` for `cause`); `PLAYER_HURT_ENTITY` in `LivingEntity`.
+- **Why.** `Projectile#getOwner` is guarded, but the owners of `AreaEffectCloud`, `PrimedTnt` and `EvokerFangs` are not. A
+  player who leaves a cloud or lit TNT and teleports away gets a stat and criterion write from the victim's region, while
+  their own region copies the same `HashSet` (`ConcurrentModificationException` or a corrupted set). `getPlayers` returns
+  every player of the world, not only the region's.
+- **Done when.** Stats and criteria run only on the player's thread, or are handed over with the entity scheduler.
+  Extends patch 0036. Upstream reference: [#496](https://github.com/PaperMC/Folia/pull/496).
+
+#### T-206 `Bukkit.reloadData`, `resetRecipes` and `Datapack#setEnabled` fail with a bare exception
+- **Where.** `MinecraftServer#reloadResources`: `supplyAsync(..., this)` goes to `MinecraftServer#execute`, which throws
+  `UnsupportedOperationException` on Folia. The later check against `serverThread` would also skip the player reload.
+- **Done when.** Either these calls work, or they fail with a clear message and the javadoc says so. Upstream chose to
+  disable them ([#498](https://github.com/PaperMC/Folia/pull/498)).
+
+#### T-207 The locator bar reads attributes of players in other regions
+- **Where.** `WaypointTransmitter` (range check), called from `ServerWaypointManager`. Patch 0049.
+- **Why.** `AttributeInstance#getValue` writes `cachedValue` and `dirty`, so reading it from the receiver's thread races
+  with the owner: a sneaking player can keep a stale range until the next attribute change. `calculateValue` also walks a
+  fastutil map the owner may be changing; whether that can throw is not confirmed.
+- **Done when.** The range is published by the owner in a plain volatile field, and receivers read that.
+
+#### T-208 Fast projectiles are still discarded
+- **Where.** `AbstractArrow`, `AbstractHurtingProjectile`, `ThrowableProjectile` (`setPos`), `Entity#tesseraMoveOutOfRegion`.
+  Patch 0057.
+- **Why.** These projectiles do not go through `Entity#move`, so an arrow leaving the region in one tick still fails the
+  thread check in `EntityLookup` and is discarded. Separately, the result of `teleportAsync` in the fix is ignored: outside
+  the spawnable bounds, or for a dying entity, the entity freezes and schedules a new task every tick.
+- **Done when.** Projectiles take the same path, and a failed teleport stops or removes the entity.
+
+#### T-209 `World#getRaids` returns raids of other regions
+- **Where.** `CraftWorld#getRaids`, `CraftRaid`. There is no `ownsRaid` filter, unlike `locateNearestRaid`.
+- **Why.** `getRaiders()` walks plain collections while a wave spawns in the raid's region, `getHeroes()` is a live view,
+  and `setBadOmenLevel` writes with no thread check.
+- **Done when.** The list is limited to the current region, or the data is copied safely, with the behaviour documented.
+
+#### Patched, not tested
+Patches 0071 to 0075 and paper 0038 compile, but the test run was stopped before it finished. T-019 (only the
+`MapInitializeEvent` lead), T-202, T-204, T-208 and T-209 stay open until each is checked on a running server. `/save-all` too.
+
 ---
 
 ## P2 — performance
-
-### T-041 Asynchronous entity tracker
-- **What.** Move the computation of who sees whom (`ChunkMap.TrackedEntity#updatePlayer`) to a thread pool, then
-  apply on the region thread. This addresses the "all players in one region" case (O(P·E) complexity).
-- **Done when.** With 100 bots and 3000 entities in one region, tracker MSPT drops noticeably, without client desync.
 
 ### T-042 Asynchronous pathfinding
 - Compute `PathNavigation` / `PathFinder` off the region thread from a block snapshot, apply the result in the tick.
@@ -90,6 +152,24 @@ Rest of the item about minor races (the rest is in "Done").
 
 ## P3 — later
 
+- **T-210** Crash reports: a failed region only logs an error and stops the server (`TickRegionScheduler#regionFailed`,
+  `uncaughtException`), no file in `crash-reports/`. Upstream reference: [#463](https://github.com/PaperMC/Folia/pull/463).
+- **T-211** Minor races from the 2026-10-31 audit, none of them traced to a crash: `CraftPlayer#pluginWeakReferences` (static `WeakHashMap`
+  behind `hidePlayer`, a missed `remove` leaves a player hidden; patch paper 0007 covers only the per-player map), the
+  statistic API in `CraftPlayer` and `CraftOfflinePlayer` (no thread check, parallel offline updates overwrite each other),
+  `RandomSequence` shared by regions rolling one loot table, `LivingEntity#getLastHurtByPlayer` and `getKiller()` returning a
+  player of another region. `WorldBorder` is still marked "TODO make this shit thread-safe": `extent` is a plain field,
+  ticked on the global thread and written by `CraftWorldBorder` from any thread, and a border shared by players in two regions
+  ticks in both. Not traced: `CraftWorld#setSpawnLocation`, `setDifficulty`, `CraftDragonBattle`.
+- **T-212** Commands still disabled in `Commands.java`: `bossbar`, `clone`, `data`, `datapack`, `function`, `item`, `loot`,
+  `save-all`, `schedule`, `spectate`, `spreadplayers`, `tag`, `teammsg`, `tick`, `waypoint`. Boss bars (0031) and command
+  storage (0032) are already thread-safe, so `bossbar` and `data storage` are the closest. `save-all` matters most, see patch 0068. Datapack `#tick` and `#load` functions (`getFunctions().tick()` is commented out in `MinecraftServer`), `/schedule`
+  events and command blocks (`BaseCommandBlock#performCommand` returns `false`) do not run at all; design first.
+- **T-213** Entity schedulers on shutdown: check that players' schedulers are retired, so plugin retired callbacks run, as on
+  Paper ([#479](https://github.com/PaperMC/Folia/issues/479), closed upstream). Only `PlayerList#remove` was seen calling
+  `retireScheduler`.
+- **T-214** `MinecraftServer#tickables` never run (`if (false)` in the tick), so the server GUI player list does not update
+  ([#464](https://github.com/PaperMC/Folia/pull/464)).
 - **T-054** JSON logs for Loki/ELK (deferred until there is Grafana/ELK): a `json` style in `TesseraLogStyle` (one JSON line per event
   to stdout) and `-Dtessera.log.json-file=true` → `logs/latest.json` with rotation like `latest.log`. ECS via `log4j-layout-template-json`;
   fields `@timestamp`, `log.level`, `log.logger`, `message` without `§`/ANSI, `process.thread.name`, `tessera.plugin`, context data from T-052
@@ -283,3 +363,7 @@ Folia regions are already isolated, the next step is spreading them across proce
 | Distant mob AI behind `performance.distant-mob-ai` (default `false`): mobs further than `distant-mob-ai-start-distance` (12) blocks from the nearest player choose goals, run sensors and start behaviours every distance²/256 ticks, at most `distant-mob-ai-max-interval` (20); `distant-mob-ai-exclude` lists entity types to skip. Running goals and behaviours, movement and memory timers tick every tick. With the default entity activation range the effect covers 12 to 32 blocks. 1000 cows and villagers 18 to 30 blocks from one bot, two alternating pairs of runs: median region MSPT 43.9 to 40.6 and 35.7 to 30.7, 8 to 14% lower, mobs moved as far, no errors. Target, hurt and exclude paths were not driven separately; farms and client behaviour were not checked, T-043 | — | 0063 / paper 0034 |
 | Region merge radius is configurable: `threaded-regions.merge-radius` in `config/paper-global.yml` (default 1, as before, clamped to 1..16, read at startup) next to `grid-exponent`, both documented in REGION_LOGIC.md. Two bots 2000 blocks apart: 2 regions with radius 1, 1 region of 578 chunks with radius 8, no errors. Performance of larger regions was not measured, T-044 | — | 0062 / paper 0033 |
 | Player autosaves are spread over the save interval: without an explicit `player-auto-save.rate` or `max-per-tick`, a region saves players/interval + 1 per tick instead of 20. 30 bots, autosave every 600 ticks: no difference on an idle disk; under constant fsync load the worst tick fell from 3.4 s to 0.31 s and the typical worst tick of an autosave window from about 350 to 270 ms (one run each). Spikes remain under disk load because the write is still synchronous on the region thread. Chunks are already capped at 24 per region tick and maps are saved asynchronously, by reading the code; neither was measured separately, T-046 | — | 0064 / paper 0035 |
+| Async entity tracker check behind `performance.async-entity-tracker` (default `false`): in regions with at least 10000 entity and player pairs a pool (`async-entity-tracker-threads`, default a quarter of the CPU threads, at most 4) finds entities whose viewers changed while the region thread waits; the update itself, events and packets stay on the region thread. 100 bots and 3000 cows in one region, 6 region threads, two runs each, off/on. Stationary mobs: tracker 16.5/3.1 ms per tick, median MSPT 47/34. 10% of mobs moving: tracker 17-19.5/4.7 ms, median MSPT 47-54/37-38. With all mobs moving, the Python bots fall behind and time out, so that case has only a JFR profile of the old code: about 45% of tracker time is `sendChanges`, which this does not move. Viewer pairs from `getTrackedBy` match with the option off through a teleport to another region and back, `hideEntity`/`showEntity` and a kick, no tracker errors. Not tested: a real client, several large regions sharing the pool, bots walking, T-041 | — | 0065 / paper 0036 |
+| A loan of a region that ends, or fails to start, between a failed acquire and the `isBorrowed` check no longer stops the server: the scheduler tries again. Found by reading the code, the race itself was not reproduced: a compatibility-mode plugin borrowing two regions 40 times a tick ran about 128000 loans in 160 s with 4 region threads and no errors. The old build crashed on T-201 within about 20 s of the same run, so it gives no baseline, T-200 | — | 0066 |
+| The wandering trader spawner uses the random of the level instead of one `LegacyRandomSource` shared by all regions; the timer survives region merges and splits (the merge and split path was not driven separately). Three regions, 4 threads, trader timer set to every tick: the old build stopped with `Accessing LegacyRandomSource from multiple threads` within about 20 s, the new one ran 160 s with no errors, T-201 | — | 0067 |
+| Management `server/save` queues a save of chunks and players on every region. Before, the call returned `true` and the player file stayed unchanged; now the player file and `r.0.0.mca` are rewritten within seconds. The chunk file of the old run was not compared (the test looked at another dimension). The result means the saves were queued, not finished, T-205 | — | 0068 |

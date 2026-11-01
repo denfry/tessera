@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sun, 1 Nov 2026 23:15:04 +0300
+Subject: [PATCH] Return only the raids of the current region
+
+The returned raids read collections that the region of the raid changes
+while a wave spawns, and write to it with no thread check.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+index 44c517dbc3b5084e464b832b536e3b999e9baa11..d9fbfc73badd78c235bc364545a75a7d46b6a85d 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftWorld.java
+@@ -2000,7 +2000,7 @@ public class CraftWorld extends CraftRegionAccessor implements World {
+     @Override
+     public List<Raid> getRaids() {
+         Raids persistentRaid = this.world.getRaids();
+-        return persistentRaid.raidMap.values().stream().map(raid -> new CraftRaid(raid, this.world)).collect(Collectors.toList());
++        return persistentRaid.raidMap.values().stream().filter(raid -> raid.ownsRaid(this.world)).map(raid -> new CraftRaid(raid, this.world)).collect(Collectors.toList()); // Tessera - a raid is only safe to use from its own region
+     }
+ 
+     @Override

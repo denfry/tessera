@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sat, 31 Oct 2026 12:38:45 +0300
+Subject: [PATCH] Retry acquiring a region when a loan ended meanwhile
+
+The scheduler fails to acquire a region held by the global tick thread
+and only then asks whether the region is borrowed. A loan that ends, or
+fails to start, between the two steps looks like a broken region, and
+the scheduler stops the server. When the region is not borrowed after a
+failed acquire it is free, so try again.
+
+diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+index d83f3caf9f1f67d14a7250b6f7834e4039e20017..e0e196e2626e05f6d3c3a6c58dcb68b0f94fa9ef 100644
+--- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+@@ -379,6 +379,21 @@ public final class TickRegionScheduler {
+ 
+         protected abstract boolean tryMarkTicking();
+ 
++        // Tessera start - region loans for plugins in compatibility mode
++        // a loan can end, or fail to start, between the failed acquire and the isBorrowed check; the region is free then
++        private boolean tesseraTryMarkTicking() {
++            for (int i = 0; i < 16; ++i) {
++                if (this.tryMarkTicking()) {
++                    return true;
++                }
++                if (this.region == null || TesseraRegionLoan.isBorrowed(this.region)) {
++                    return false;
++                }
++            }
++            return false;
++        }
++        // Tessera end - region loans for plugins in compatibility mode
++
+         protected abstract boolean markNotTicking();
+ 
+         protected abstract void tickRegion(final long tickCount, final long startTime, final long scheduledEnd);
+@@ -401,7 +416,7 @@ public final class TickRegionScheduler {
+             final long cpuStart = MEASURE_CPU_TIME ? THREAD_MX_BEAN.getCurrentThreadCpuTime() : 0L;
+             final long tickStart = System.nanoTime();
+ 
+-            if (!this.tryMarkTicking()) {
++            if (!this.tesseraTryMarkTicking()) { // Tessera - region loans for plugins in compatibility mode
+                 if (!this.cancelled.get()) {
+                     // Tessera start - region loans for plugins in compatibility mode
+                     if (this.region != null && TesseraRegionLoan.isBorrowed(this.region)) {
+@@ -467,7 +482,7 @@ public final class TickRegionScheduler {
+             // use max(), don't assume that tickStart >= scheduledStart
+             final long tickCount = Math.max(1L, this.tickSchedule.getPeriodsAhead(TIME_BETWEEN_TICKS, tickStart));
+ 
+-            if (!this.tryMarkTicking()) {
++            if (!this.tesseraTryMarkTicking()) { // Tessera - region loans for plugins in compatibility mode
+                 if (!this.cancelled.get()) {
+                     // Tessera start - region loans for plugins in compatibility mode
+                     if (this.region != null && TesseraRegionLoan.isBorrowed(this.region)) {

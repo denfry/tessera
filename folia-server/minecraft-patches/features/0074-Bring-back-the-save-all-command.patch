@@ -1,0 +1,50 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sun, 1 Nov 2026 23:14:58 +0300
+Subject: [PATCH] Bring back the save-all command
+
+The command was disabled because saveEverything only sees the current
+region. Use the save that the management server already has, which queues
+a save on every region. It reports that the saves are queued, not that
+they finished.
+
+diff --git a/net/minecraft/commands/Commands.java b/net/minecraft/commands/Commands.java
+index 790a7609729c4f21312583c5f08b51a43ab2ec91..3f3da9c1796bd22bad7019fe7da1b1f798315d3e 100644
+--- a/net/minecraft/commands/Commands.java
++++ b/net/minecraft/commands/Commands.java
+@@ -297,7 +297,7 @@ public class Commands {
+             PardonCommand.register(this.dispatcher);
+             PardonIpCommand.register(this.dispatcher);
+             //PerfCommand.register(this.dispatcher); // Folia - region threading - TODO later
+-            //SaveAllCommand.register(this.dispatcher); // Folia - region threading - TODO later
++            SaveAllCommand.register(this.dispatcher); // Tessera - saves every region
+             SaveOffCommand.register(this.dispatcher);
+             SaveOnCommand.register(this.dispatcher);
+             SetPlayerIdleTimeoutCommand.register(this.dispatcher);
+diff --git a/net/minecraft/server/commands/SaveAllCommand.java b/net/minecraft/server/commands/SaveAllCommand.java
+index 299991905c24a7018f8ac60d0c16e56fa43cd710..75b930656ff4244c9d09bd6d218ceba2a481564b 100644
+--- a/net/minecraft/server/commands/SaveAllCommand.java
++++ b/net/minecraft/server/commands/SaveAllCommand.java
+@@ -24,12 +24,16 @@ public class SaveAllCommand {
+     private static int saveAll(final CommandSourceStack source, final boolean flush) throws CommandSyntaxException {
+         source.sendSuccess(() -> Component.translatable("commands.save.saving"), false);
+         MinecraftServer server = source.getServer();
+-        boolean success = server.saveEverything(true, flush, true);
+-        if (!success) {
+-            throw ERROR_FAILED.create();
+-        }
+-
+-        source.sendSuccess(() -> Component.translatable("commands.save.success"), true);
++        // Tessera start - saves every region
++        // Global data is saved on the global tick, and the regions only queue their saves there.
++        io.papermc.paper.threadedregions.RegionizedServer.getInstance().addTask(() -> {
++            if (server.tesseraSaveEverythingRegionised(flush, true)) {
++                source.sendSuccess(() -> Component.literal("Queued a save of all regions"), true);
++            } else {
++                source.sendFailure(Component.translatable("commands.save.failed"));
++            }
++        });
++        // Tessera end - saves every region
+         return Command.SINGLE_SUCCESS;
+     }
+ }

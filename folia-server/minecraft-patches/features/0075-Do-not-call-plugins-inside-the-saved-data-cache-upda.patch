@@ -1,0 +1,38 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Sun, 1 Nov 2026 23:14:59 +0300
+Subject: [PATCH] Do not call plugins inside the saved data cache update
+
+MapInitializeEvent ran inside ConcurrentHashMap#computeIfAbsent, so a
+plugin reading another map from the handler could fail with a recursive
+update or block the other threads that hash to the same bin.
+
+diff --git a/net/minecraft/world/level/storage/SavedDataStorage.java b/net/minecraft/world/level/storage/SavedDataStorage.java
+index 74b055c34aba4d52b1d55965015ba2eface0dc4a..531e6566f9c14b7c064e3651cb6c8acedc1e99eb 100644
+--- a/net/minecraft/world/level/storage/SavedDataStorage.java
++++ b/net/minecraft/world/level/storage/SavedDataStorage.java
+@@ -70,13 +70,17 @@ public class SavedDataStorage implements AutoCloseable {
+             return (T)immediate.orElse(null);
+         } // else: fall back to slow path
+ 
+-        return (T)this.cache.computeIfAbsent(type, (SavedDataType<?> key) -> {
+-            SavedData onDisk = SavedDataStorage.this.readSavedData(key);
+-            if (onRead != null) {
+-                onRead.accept((T)onDisk);
+-            }
+-            return Optional.ofNullable(onDisk);
+-        }).orElse(null);
++        // Tessera start - onRead runs plugin code, which may read other data, so it cannot run inside computeIfAbsent
++        SavedData onDisk = this.readSavedData(type);
++        Optional<SavedData> existing = this.cache.putIfAbsent(type, Optional.ofNullable(onDisk));
++        if (existing != null) {
++            return (T)existing.orElse(null);
++        }
++        if (onRead != null) {
++            onRead.accept((T)onDisk);
++        }
++        return (T)onDisk;
++        // Tessera end - onRead runs plugin code, which may read other data, so it cannot run inside computeIfAbsent
+     }
+     // Folia end - region threading
+ 
