@@ -1,0 +1,215 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Mon, 2 Nov 2026 08:32:05 +0300
+Subject: [PATCH] Swap recipe data as a snapshot and reload players on their
+ thread
+
+A plugin changing recipes wrote to plain maps that furnaces and crafting
+in other regions were reading, and the failed read removes the block
+entity. Writes now publish new maps. Reloading advancements and the recipe
+book for every online player ran on the calling thread, which raced with
+the regions of those players and could lose progress.
+
+Based on PaperMC/Folia#498 (the per-player reloads)
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index f6efc60a839511587cc8c59db19bff8c88a44f3a..f2fad43146db939b85d7e2ac1df4dbdb86e41ac8 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -1444,6 +1444,11 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+             .forEach(mob -> ((NeutralMob)mob).playerDied(this.level(), this));
+     }
+ 
++    // Tessera start - the advancements and recipe book of a player belong to the player's thread
++    public final java.util.concurrent.atomic.AtomicBoolean tesseraAdvancementReloadPending = new java.util.concurrent.atomic.AtomicBoolean();
++    public final java.util.concurrent.atomic.AtomicBoolean tesseraRecipeReloadPending = new java.util.concurrent.atomic.AtomicBoolean();
++    // Tessera end - the advancements and recipe book of a player belong to the player's thread
++
+     @Override
+     public void awardKillScore(final Entity victim, final DamageSource killingBlow) {
+         // Tessera start - the killer can be in another region
+diff --git a/net/minecraft/server/players/PlayerList.java b/net/minecraft/server/players/PlayerList.java
+index ba55ca2c8c758fa03034488ecbaa5ea96e66a43a..37392f082cc360757256dbf500efb6e1129dc893 100644
+--- a/net/minecraft/server/players/PlayerList.java
++++ b/net/minecraft/server/players/PlayerList.java
+@@ -1388,8 +1388,17 @@ public abstract class PlayerList {
+         //     playerAdvancements.reload(this.server.getAdvancements());
+         // }
+         for (ServerPlayer player : this.players) {
+-            player.getAdvancements().reload(this.server.getAdvancements());
+-            player.getAdvancements().flushDirty(player, false); // CraftBukkit - trigger immediate flush of advancements
++            // Tessera start - the advancements of a player belong to the player's thread
++            // A plugin adding many recipes asks for this once per recipe, and each reload is expensive.
++            if (!player.tesseraAdvancementReloadPending.compareAndSet(false, true)) {
++                continue;
++            }
++            player.getBukkitEntity().taskScheduler.schedule((ServerPlayer entityPlayer) -> {
++                entityPlayer.tesseraAdvancementReloadPending.set(false);
++                entityPlayer.getAdvancements().reload(this.server.getAdvancements());
++                entityPlayer.getAdvancements().flushDirty(entityPlayer, false); // CraftBukkit - trigger immediate flush of advancements
++            }, null, 20L);
++            // Tessera end - the advancements of a player belong to the player's thread
+         }
+         // CraftBukkit end
+ 
+@@ -1410,8 +1419,17 @@ public abstract class PlayerList {
+         );
+ 
+         for (ServerPlayer player : this.players) {
+-            player.connection.send(recipes);
+-            player.getRecipeBook().sendInitialRecipeBook(player);
++            // Tessera start - the recipe book of a player belongs to the player's thread
++            if (!player.tesseraRecipeReloadPending.compareAndSet(false, true)) {
++                continue;
++            }
++            player.getBukkitEntity().taskScheduler.schedule((ServerPlayer entityPlayer) -> {
++                entityPlayer.tesseraRecipeReloadPending.set(false);
++                final RecipeManager currentRecipes = this.server.getRecipeManager();
++                entityPlayer.connection.send(new ClientboundUpdateRecipesPacket(currentRecipes.getSynchronizedItemProperties(), currentRecipes.getSynchronizedStonecutterRecipes()));
++                entityPlayer.getRecipeBook().sendInitialRecipeBook(entityPlayer);
++            }, null, 20L);
++            // Tessera end - the recipe book of a player belongs to the player's thread
+         }
+     }
+ }
+diff --git a/net/minecraft/world/item/crafting/RecipeManager.java b/net/minecraft/world/item/crafting/RecipeManager.java
+index d9ac0c84285c96df934d8649ea659ab11925cb9a..4ff1155a97be7987c869e9d041d3f5846d855632 100644
+--- a/net/minecraft/world/item/crafting/RecipeManager.java
++++ b/net/minecraft/world/item/crafting/RecipeManager.java
+@@ -46,12 +46,14 @@ public class RecipeManager implements RecipeAccess {
+         RecipePropertySet.BREWING_REAGENTS,
+         recipe -> recipe instanceof BrewingRecipe brewingRecipe ? Optional.of(brewingRecipe.getReagent().ingredient()) : Optional.empty()
+     );
+-    public RecipeMap recipes;
+-    private Map<ResourceKey<RecipePropertySet>, RecipePropertySet> propertySets = Map.of();
+-    private SelectableRecipe.SingleInputSet<StonecutterRecipe> stonecutterRecipes = SelectableRecipe.SingleInputSet.empty();
+-    private List<RecipeManager.ServerDisplayInfo> allDisplays = List.of();
+-    private Map<ResourceKey<Recipe<?>>, List<RecipeManager.ServerDisplayInfo>> recipeToDisplay = Map.of();
+-    private Collection<RecipeHolder<?>> learnableRecipes;
++    // Tessera start - regions read recipes while plugins change them
++    public volatile RecipeMap recipes;
++    private volatile Map<ResourceKey<RecipePropertySet>, RecipePropertySet> propertySets = Map.of();
++    private volatile SelectableRecipe.SingleInputSet<StonecutterRecipe> stonecutterRecipes = SelectableRecipe.SingleInputSet.empty();
++    private volatile List<RecipeManager.ServerDisplayInfo> allDisplays = List.of();
++    private volatile Map<ResourceKey<Recipe<?>>, List<RecipeManager.ServerDisplayInfo>> recipeToDisplay = Map.of();
++    private volatile Collection<RecipeHolder<?>> learnableRecipes;
++    // Tessera end - regions read recipes while plugins change them
+ 
+     public RecipeManager(final HolderLookup.Provider registries) {
+         HolderLookup.RegistryLookup<Recipe<?>> recipeRegistries = registries.lookupOrThrow(Registries.RECIPE);
+@@ -60,7 +62,7 @@ public class RecipeManager implements RecipeAccess {
+     }
+ 
+     // CraftBukkit start
+-    public void addRecipe(RecipeHolder<?> holder) {
++    public synchronized void addRecipe(RecipeHolder<?> holder) { // Tessera - regions read recipes while plugins change them
+         org.spigotmc.AsyncCatcher.catchOp("Recipe Add"); // Spigot
+         this.recipes.addRecipe(holder);
+         this.finalizeRecipeLoading();
+@@ -68,7 +70,7 @@ public class RecipeManager implements RecipeAccess {
+ 
+     private FeatureFlagSet enabledFlags;
+ 
+-    public void finalizeRecipeLoading() {
++    public synchronized void finalizeRecipeLoading() { // Tessera - regions read recipes while plugins change them
+         this.learnableRecipes = this.recipes.values().stream().filter(r -> !r.value().isSpecial()).toList(); // Paper - refresh learnable recipes after runtime recipe changes
+         if (this.enabledFlags != null) {
+             this.finalizeRecipeLoading(this.enabledFlags);
+@@ -77,7 +79,7 @@ public class RecipeManager implements RecipeAccess {
+         }
+     }
+ 
+-    public void finalizeRecipeLoading(final FeatureFlagSet enabledFlags) {
++    public synchronized void finalizeRecipeLoading(final FeatureFlagSet enabledFlags) { // Tessera - regions read recipes while plugins change them
+         this.enabledFlags = enabledFlags;
+         // CraftBukkit end
+         List<SelectableRecipe.SingleInputEntry<StonecutterRecipe>> stonecutterRecipes = new ArrayList<>();
+@@ -196,7 +198,7 @@ public class RecipeManager implements RecipeAccess {
+         return removed;
+     }
+ 
+-    public void clearRecipes() {
++    public synchronized void clearRecipes() { // Tessera - regions read recipes while plugins change them
+         this.recipes = RecipeMap.createEmpty();
+         this.finalizeRecipeLoading();
+     }
+diff --git a/net/minecraft/world/item/crafting/RecipeMap.java b/net/minecraft/world/item/crafting/RecipeMap.java
+index b6142dc1f3b8b358965c16dcacf5a5979470b239..534e863cc6443325f2b42c0054c3dc5d95915e88 100644
+--- a/net/minecraft/world/item/crafting/RecipeMap.java
++++ b/net/minecraft/world/item/crafting/RecipeMap.java
+@@ -14,8 +14,10 @@ import org.jspecify.annotations.Nullable;
+ 
+ public class RecipeMap {
+     public static final RecipeMap EMPTY = new RecipeMap(ImmutableMultimap.of(), Map.of());
+-    public final Multimap<RecipeType<?>, RecipeHolder<?>> byType;
+-    public final Map<ResourceKey<Recipe<?>>, RecipeHolder<?>> byKey;
++    // Tessera start - regions read recipes while plugins change them, so a change publishes new maps
++    public volatile Multimap<RecipeType<?>, RecipeHolder<?>> byType;
++    public volatile Map<ResourceKey<Recipe<?>>, RecipeHolder<?>> byKey;
++    // Tessera end - regions read recipes while plugins change them, so a change publishes new maps
+ 
+     private RecipeMap(final Multimap<RecipeType<?>, RecipeHolder<?>> byType, final Map<ResourceKey<Recipe<?>>, RecipeHolder<?>> byKey) {
+         this.byType = byType;
+@@ -38,30 +40,54 @@ public class RecipeMap {
+         return new RecipeMap(com.google.common.collect.LinkedHashMultimap.create(), com.google.common.collect.Maps.newLinkedHashMap());
+     }
+ 
+-    public void addRecipe(RecipeHolder<?> holder) {
++    public synchronized void addRecipe(RecipeHolder<?> holder) { // Tessera - regions read recipes while plugins change them
+         holder = holder.asRuntimeAddedRecipe(); // Mark recipes holder as added during runtime
+-        Collection<RecipeHolder<?>> recipes = this.byType.get(holder.value().getType());
+ 
+         if (this.byKey.containsKey(holder.id())) {
+             throw new IllegalStateException("Duplicate recipe ignored with ID " + holder.id());
+         } else {
+-            recipes.add(holder);
+-            this.byKey.put(holder.id(), holder);
++            // Tessera start - regions read recipes while plugins change them
++            final Multimap<RecipeType<?>, RecipeHolder<?>> newByType = com.google.common.collect.LinkedHashMultimap.create(this.byType);
++            final Map<ResourceKey<Recipe<?>>, RecipeHolder<?>> newByKey = com.google.common.collect.Maps.newLinkedHashMap(this.byKey);
++            newByType.put(holder.value().getType(), holder);
++            newByKey.put(holder.id(), holder);
++            this.byType = newByType;
++            this.byKey = newByKey;
++            // Tessera end - regions read recipes while plugins change them
+         }
+     }
+     // CraftBukkit end
+ 
+     // Paper start - replace removeRecipe implementation
+-    public boolean removeRecipe(ResourceKey<Recipe<?>> id) {
+-        final RecipeHolder<?> remove = this.byKey.remove(id);
++    public synchronized boolean removeRecipe(ResourceKey<Recipe<?>> id) { // Tessera - regions read recipes while plugins change them
++        final RecipeHolder<?> remove = this.byKey.get(id); // Tessera - regions read recipes while plugins change them
+         if (remove == null) {
+             return false;
+         }
+-        final Collection<? extends RecipeHolder<?>> recipes = this.byType(remove.value().getType());
+-        return recipes.remove(remove);
++        // Tessera start - regions read recipes while plugins change them
++        final Multimap<RecipeType<?>, RecipeHolder<?>> newByType = com.google.common.collect.LinkedHashMultimap.create(this.byType);
++        final Map<ResourceKey<Recipe<?>>, RecipeHolder<?>> newByKey = com.google.common.collect.Maps.newLinkedHashMap(this.byKey);
++        newByKey.remove(id);
++        final boolean removed = newByType.remove(remove.value().getType(), remove);
++        this.byType = newByType;
++        this.byKey = newByKey;
++        return removed;
++        // Tessera end - regions read recipes while plugins change them
+     }
+     // Paper end - replace removeRecipe implementation
+ 
++    // Tessera start - regions read recipes while plugins change them
++    public synchronized void removeRecipes(final RecipeType<?> type) {
++        final Multimap<RecipeType<?>, RecipeHolder<?>> newByType = com.google.common.collect.LinkedHashMultimap.create(this.byType);
++        final Map<ResourceKey<Recipe<?>>, RecipeHolder<?>> newByKey = com.google.common.collect.Maps.newLinkedHashMap(this.byKey);
++        for (final RecipeHolder<?> holder : newByType.removeAll(type)) {
++            newByKey.remove(holder.id());
++        }
++        this.byType = newByType;
++        this.byKey = newByKey;
++    }
++    // Tessera end - regions read recipes while plugins change them
++
+     public <I extends RecipeInput, T extends Recipe<I>> Collection<RecipeHolder<T>> byType(final RecipeType<T> type) {
+         return (Collection)this.byType.get(type);
+     }

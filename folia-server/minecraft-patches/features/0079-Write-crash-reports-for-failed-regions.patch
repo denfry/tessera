@@ -1,0 +1,59 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Mon, 2 Nov 2026 08:33:27 +0300
+Subject: [PATCH] Write crash reports for failed regions
+
+A failed region only logged an error and stopped the server, so nothing
+appeared in crash-reports and the system details were lost.
+
+Based on PaperMC/Folia#463
+
+diff --git a/io/papermc/paper/threadedregions/TickRegionScheduler.java b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+index e0e196e2626e05f6d3c3a6c58dcb68b0f94fa9ef..976154a281dd57d7b48bf98be5fa0cf79afdfbb1 100644
+--- a/io/papermc/paper/threadedregions/TickRegionScheduler.java
++++ b/io/papermc/paper/threadedregions/TickRegionScheduler.java
+@@ -285,6 +285,7 @@ public final class TickRegionScheduler {
+ 
+     private void uncaughtException(final Thread thread, final Throwable thr) {
+         LOGGER.error("Uncaught exception in tick thread \"" + thread.getName() + "\"", thr);
++        tesseraSaveCrashReport(thr, "Uncaught exception in tick thread", "Thread", thread.getName()); // Tessera - write crash reports
+ 
+         // prevent further ticks from occurring
+         // we CANNOT sync, because WE ARE ON A SCHEDULER THREAD
+@@ -304,10 +305,36 @@ public final class TickRegionScheduler {
+         final ServerLevel world = handle.region == null ? null : handle.region.world;
+ 
+         LOGGER.error("Region #" + (handle.region == null ? -1L : handle.region.id) + " centered at chunk " + center + " in world '" + (world == null ? "null" : world.getWorld().getName()) + "' failed to " + (executingTasks ? "execute tasks" : "tick") + ":", thr);
++        // Tessera start - write crash reports
++        tesseraSaveCrashReport(
++            thr, "Region failed to " + (executingTasks ? "execute tasks" : "tick"), "Region",
++            handle.region == null ? "global" : "#" + handle.region.id + " in " + (world == null ? "null" : world.getWorld().getName()) + " at chunk " + center
++        );
++        // Tessera end - write crash reports
+ 
+         MinecraftServer.getServer().stopServer();
+     }
+ 
++    // Tessera start - write crash reports
++    private static void tesseraSaveCrashReport(final Throwable thr, final String title, final String detail, final String value) {
++        try {
++            final net.minecraft.CrashReport report = net.minecraft.CrashReport.forThrowable(thr, title);
++            MinecraftServer.getServer().fillSystemReport(report.getSystemReport());
++            report.addCategory("Region").setDetail(detail, value);
++            final java.nio.file.Path path = MinecraftServer.getServer().getServerDirectory().resolve("crash-reports")
++                .resolve("crash-" + net.minecraft.util.Util.getFilenameFormattedDateTime() + "-server.txt");
++            if (report.saveToFile(path, net.minecraft.ReportType.CRASH)) {
++                LOGGER.error("This crash report has been saved to: {}", path.toAbsolutePath());
++            } else {
++                LOGGER.error("We were unable to save this crash report to disk.");
++            }
++        } catch (final Throwable reportFailure) {
++            // the shutdown matters more than the report
++            LOGGER.error("Failed to write a crash report", reportFailure);
++        }
++    }
++    // Tessera end - write crash reports
++
+     // By using our own thread object, we can use a field for the current region rather than a ThreadLocal.
+     // This is much faster than a thread local, since the thread local has to use a map lookup.
+     private static final class TickThreadRunner extends TickThread {

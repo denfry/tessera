@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Mon, 2 Nov 2026 08:33:28 +0300
+Subject: [PATCH] Document that data reloads are not supported on Folia
+
+
+diff --git a/src/main/java/io/papermc/paper/datapack/Datapack.java b/src/main/java/io/papermc/paper/datapack/Datapack.java
+index fff0cdb98f1baa04054ce85c2fb1fb460023f050..5233c158c871a27848b404ea2deba577c36b3a74 100644
+--- a/src/main/java/io/papermc/paper/datapack/Datapack.java
++++ b/src/main/java/io/papermc/paper/datapack/Datapack.java
+@@ -24,6 +24,8 @@ public interface Datapack extends DiscoveredDatapack {
+      * Changes the enabled state of this pack. Will
+      * cause a reload of resources ({@code /minecraft:reload}) if
+      * any change happens.
++     * <p>
++     * Not supported on Folia: if a change is needed, this throws an {@link UnsupportedOperationException}.
+      *
+      * @param enabled true to enable, false to disable
+      * @apiNote This method may be deprecated in the future as setters on a "snapshot" type are undesirable.
+diff --git a/src/main/java/org/bukkit/Bukkit.java b/src/main/java/org/bukkit/Bukkit.java
+index dcc8e7a4d62cc2db5d4ccebff46641674f817b06..7a532a428ec1f8d8da97ff43482031ba862b4434 100644
+--- a/src/main/java/org/bukkit/Bukkit.java
++++ b/src/main/java/org/bukkit/Bukkit.java
+@@ -1033,6 +1033,8 @@ public final class Bukkit {
+     /**
+      * Reload only the Minecraft data for the server. This includes custom
+      * advancements and loot tables.
++     * <p>
++     * Not supported on Folia, this throws an {@link UnsupportedOperationException}.
+      */
+     public static void reloadData() {
+         server.reloadData();
+@@ -1327,6 +1329,8 @@ public final class Bukkit {
+ 
+     /**
+      * Resets the list of crafting recipes to the default.
++     * <p>
++     * Not supported on Folia, this throws an {@link UnsupportedOperationException}.
+      */
+     public static void resetRecipes() {
+         server.resetRecipes();

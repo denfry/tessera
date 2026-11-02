@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Mon, 2 Nov 2026 08:33:27 +0300
+Subject: [PATCH] Fail data reloads with a clear message
+
+Reloading data schedules work on the main thread, which does not exist on
+Folia, so these calls failed with a bare exception after already reloading
+the pack list.
+
+diff --git a/src/main/java/io/papermc/paper/datapack/PaperDatapack.java b/src/main/java/io/papermc/paper/datapack/PaperDatapack.java
+index bbd709529c58d8b690f56c6f523008d7a04bfbcd..3935fb257a73a7e36a2617cd796175e0678fe9ba 100644
+--- a/src/main/java/io/papermc/paper/datapack/PaperDatapack.java
++++ b/src/main/java/io/papermc/paper/datapack/PaperDatapack.java
+@@ -37,6 +37,7 @@ public class PaperDatapack extends PaperDiscoveredDatapack implements Datapack {
+         if (enabled == enabledPacks.contains(packToChange)) {
+             return;
+         }
++        if (true) throw new UnsupportedOperationException("Enabling or disabling a datapack is not supported on Folia, restart the server instead"); // Tessera - clear error, the reload needs the main thread
+         if (enabled) {
+             packToChange.getDefaultPosition().insert(enabledPacks, packToChange, Pack::selectionConfig, false); // modeled off the default /datapack enable logic
+         } else {
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index d2c76aa11e5ae695a2baf0d9c41e7600cf83af2c..4f164e3ebbf9ba87fb91ca7ee327a025fa57169b 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -1104,6 +1104,7 @@ public final class CraftServer implements Server {
+ 
+     @Override
+     public void reloadData() {
++        if (true) throw new UnsupportedOperationException("Reloading data is not supported on Folia, restart the server instead"); // Tessera - clear error, the reload needs the main thread
+         ReloadCommand.reload(this.console);
+     }
+ 

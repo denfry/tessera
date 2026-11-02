@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Mon, 2 Nov 2026 08:33:13 +0300
+Subject: [PATCH] Publish the waypoint transmit range for other regions
+
+Receivers read the attribute of a source in another region. Reading it
+writes the cached value, which raced with the owner, and a sneaking player
+could keep a stale range until the next attribute change. The owner now
+publishes the value when it changes.
+
+diff --git a/net/minecraft/world/entity/LivingEntity.java b/net/minecraft/world/entity/LivingEntity.java
+index 8c7cd649c3f3e70c9cb48fe86006ddc30adafb7c..de8af4f20b7019b171eb5f3ed08826fb03d72ea0 100644
+--- a/net/minecraft/world/entity/LivingEntity.java
++++ b/net/minecraft/world/entity/LivingEntity.java
+@@ -330,6 +330,10 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+     protected LivingEntity(final EntityType<? extends LivingEntity> type, final Level level) {
+         super(type, level);
+         this.attributes = new AttributeMap(DefaultAttributes.getSupplier(type));
++        // Tessera start - the transmit range is read from other regions
++        final net.minecraft.world.entity.ai.attributes.AttributeInstance transmitRange = this.attributes.getInstance(Attributes.WAYPOINT_TRANSMIT_RANGE);
++        this.tesseraWaypointTransmitRange = transmitRange == null ? 0.0 : transmitRange.getValue();
++        // Tessera end - the transmit range is read from other regions
+         this.craftAttributes = new org.bukkit.craftbukkit.attribute.CraftAttributeMap(this.attributes); // CraftBukkit
+         // CraftBukkit - this.setHealth(this.getMaxHealth()) inlined and simplified to skip the instanceof check for Player, as getBukkitEntity() is not initialized in constructor
+         this.entityData.set(LivingEntity.DATA_HEALTH_ID, this.getMaxHealth());
+@@ -1360,6 +1364,8 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+         attributesToUpdate.clear();
+     }
+ 
++    public volatile double tesseraWaypointTransmitRange; // Tessera - the transmit range is read from other regions
++
+     protected void onAttributeUpdated(final Holder<Attribute> attribute) {
+         if (attribute.is(Attributes.MAX_HEALTH)) {
+             float currentMaxHealth = this.getMaxHealth();
+@@ -1375,6 +1381,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+             this.refreshDimensions();
+         } else if (attribute.is(Attributes.WAYPOINT_TRANSMIT_RANGE) && this.level() instanceof ServerLevel serverLevel) {
+             ServerWaypointManager waypointManager = serverLevel.getWaypointManager();
++            this.tesseraWaypointTransmitRange = this.attributes.getValue(attribute); // Tessera - the transmit range is read from other regions
+             if (this.attributes.getValue(attribute) > 0.0) {
+                 waypointManager.trackWaypoint(this);
+             } else {
+@@ -4990,7 +4997,7 @@ public abstract class LivingEntity extends Entity implements Attackable, Waypoin
+ 
+     @Override
+     public boolean isTransmittingWaypoint() {
+-        return this.getAttributeValue(Attributes.WAYPOINT_TRANSMIT_RANGE) > 0.0;
++        return this.tesseraWaypointTransmitRange > 0.0; // Tessera - the transmit range is read from other regions
+     }
+ 
+     @Override
+diff --git a/net/minecraft/world/waypoints/WaypointTransmitter.java b/net/minecraft/world/waypoints/WaypointTransmitter.java
+index 07af92310ee5c8bba04e6175b6faac629632e4de..abcc8f126c0d87a9deabd2e2ed2c606451d2d2e3 100644
+--- a/net/minecraft/world/waypoints/WaypointTransmitter.java
++++ b/net/minecraft/world/waypoints/WaypointTransmitter.java
+@@ -25,7 +25,7 @@ public interface WaypointTransmitter extends Waypoint {
+             return false;
+         } else if (!source.isSpectator() && !source.hasIndirectPassenger(receiver)) {
+             double broadcastRange = Math.min(
+-                source.getAttributeValue(Attributes.WAYPOINT_TRANSMIT_RANGE), receiver.getAttributeValue(Attributes.WAYPOINT_RECEIVE_RANGE)
++                source.tesseraWaypointTransmitRange, receiver.getAttributeValue(Attributes.WAYPOINT_RECEIVE_RANGE) // Tessera - the transmit range is read from other regions
+             );
+             return source.distanceToSqr(receiver) >= Mth.square(broadcastRange); // Paper - optimize waypoint distance check by using squared distance
+         } else {

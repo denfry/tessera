@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Mon, 2 Nov 2026 08:33:12 +0300
+Subject: [PATCH] Run console input that arrived during startup
+
+The command source was created when the line was read. Before the worlds
+are loaded its level is null, and the command failed with a
+NullPointerException, so a stop typed early did not stop the server.
+
+diff --git a/net/minecraft/server/dedicated/DedicatedServer.java b/net/minecraft/server/dedicated/DedicatedServer.java
+index 01004a432e727c1de46b13e70de839feb0b28354..cf7dc3ea75edd1b9504ef0005f9fb774a37f948c 100644
+--- a/net/minecraft/server/dedicated/DedicatedServer.java
++++ b/net/minecraft/server/dedicated/DedicatedServer.java
+@@ -574,6 +574,11 @@ public class DedicatedServer extends MinecraftServer implements ServerInterface
+         ConsoleInput input;
+         while ((input = this.serverCommandQueue.poll()) != null) {
+             // Paper end - Perf: use proper queue
++            // Tessera start - console input can arrive before the worlds are loaded
++            if (input.source.getLevel() == null) {
++                input = new ConsoleInput(input.msg, this.createCommandSourceStack());
++            }
++            // Tessera end - console input can arrive before the worlds are loaded
+             // CraftBukkit start - ServerCommand for preprocessing
+             org.bukkit.event.server.ServerCommandEvent event = new org.bukkit.event.server.ServerCommandEvent(this.console, input.msg);
+             this.server.getPluginManager().callEvent(event);
