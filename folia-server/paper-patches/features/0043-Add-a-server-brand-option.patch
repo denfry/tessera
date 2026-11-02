@@ -1,0 +1,61 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Mon, 2 Nov 2026 15:35:48 +0300
+Subject: [PATCH] Add a server brand option
+
+branding.server-brand in tessera.yml sets the name clients show in the F3 screen and, with the version, in the server list for an incompatible client. & color codes work. Empty keeps the build's name; nothing else that uses the server mod name, such as crash reports and the modded flag of worlds, changes.
+
+diff --git a/src/main/java/com/destroystokyo/paper/network/PaperServerListPingEventImpl.java b/src/main/java/com/destroystokyo/paper/network/PaperServerListPingEventImpl.java
+index 13b03dab807c5d83e086993af705e1d9a2676b4d..80c7769c7f593e575444eedb3b7b2d838ccd6207 100644
+--- a/src/main/java/com/destroystokyo/paper/network/PaperServerListPingEventImpl.java
++++ b/src/main/java/com/destroystokyo/paper/network/PaperServerListPingEventImpl.java
+@@ -14,7 +14,7 @@ class PaperServerListPingEventImpl extends PaperServerListPingEvent {
+ 
+     PaperServerListPingEventImpl(MinecraftServer server, StatusClient client, int protocolVersion, @Nullable CachedServerIcon icon) {
+         super(client, server.motd(), server.getPlayerCount(), server.getMaxPlayers(),
+-                server.getServerModName() + ' ' + server.getServerVersion(), protocolVersion, icon);
++                io.papermc.paper.threadedregions.TesseraCompat.serverBrand(server.getServerModName()) + ' ' + server.getServerVersion(), protocolVersion, icon); // Tessera - server brand option
+         this.server = server;
+     }
+ 
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index c8f5c8b94e533b9c409a22ed37e5853ab355a54f..664e4cfb227b0293a8bd175609026922cba858b9 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -84,8 +84,15 @@ public final class TesseraCompat {
+             Placeholders in both lists: {brand} {version} {minecraft} {java} {os} {cpus} {memory}.""")
+         .bool("console.banner.enabled", true, true, "")
+         .strings("console.banner.logo", io.papermc.paper.log.TesseraBanner.DEFAULT_LOGO, true, "")
+-        .strings("console.banner.lines", io.papermc.paper.log.TesseraBanner.DEFAULT_LINES, true, "");
++        .strings("console.banner.lines", io.papermc.paper.log.TesseraBanner.DEFAULT_LINES, true, "")
+         // Tessera end - console banner
++        // Tessera start - server brand option
++        .group("branding", "")
++        .text("branding.server-brand", "", false, """
++            The server name players see in the F3 screen and, next to the version, in the server list when
++            their client is too old or too new. Empty keeps the build's own name. & color codes work, for
++            example '&6My&fServer'. Applies to players who join after a reload; a proxy may replace it.""");
++        // Tessera end - server brand option
+ 
+     private static volatile Path configFile;
+     private static volatile Map<String, Object> values = CONFIG.defaults();
+@@ -198,6 +205,19 @@ public final class TesseraCompat {
+         return report;
+     }
+ 
++    // Tessera start - server brand option
++    /**
++     * The brand sent to clients: {@code branding.server-brand}, or {@code fallback} when it is empty.
++     */
++    public static String serverBrand(final String fallback) {
++        final Object brand = values.get("branding.server-brand");
++        if (!(brand instanceof String string) || string.isBlank()) {
++            return fallback;
++        }
++        return string.replaceAll("&([0-9a-fk-orA-FK-OR])", "\u00A7$1");
++    }
++    // Tessera end - server brand option
++
+     /**
+      * The value in effect of an option of {@code tessera.yml}.
+      */

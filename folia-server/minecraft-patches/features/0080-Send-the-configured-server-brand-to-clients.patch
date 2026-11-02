@@ -1,0 +1,20 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Mon, 2 Nov 2026 15:35:48 +0300
+Subject: [PATCH] Send the configured server brand to clients
+
+The brand payload uses branding.server-brand from tessera.yml when it is set.
+
+diff --git a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+index f8bd01d1e89484d1831ca043a75ecd3b2b0bd45d..04bf26f877d0bd43d4f76272c670ca0e3e20a1bb 100644
+--- a/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerConfigurationPacketListenerImpl.java
+@@ -102,7 +102,7 @@ public class ServerConfigurationPacketListenerImpl extends ServerCommonPacketLis
+ 
+     public void startConfiguration() {
+         new io.papermc.paper.event.connection.configuration.PlayerConnectionInitialConfigureEvent(this.paperConnection).callEvent(); // Paper
+-        this.send(new ClientboundCustomPayloadPacket(new BrandPayload(this.server.getServerModName())));
++        this.send(new ClientboundCustomPayloadPacket(new BrandPayload(io.papermc.paper.threadedregions.TesseraCompat.serverBrand(this.server.getServerModName())))); // Tessera - server brand option
+         ServerLinks serverLinks = this.server.serverLinks();
+         // Paper start
+         org.bukkit.craftbukkit.CraftServerLinks links = new org.bukkit.craftbukkit.CraftServerLinks(serverLinks);

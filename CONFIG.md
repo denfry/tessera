@@ -35,6 +35,7 @@ Tessera reads the usual Paper files (`config/paper-global.yml`, `config/paper-wo
 | `console.banner.enabled` | `true` | restart | Print the startup banner |
 | `console.banner.logo` | Tessera logo | restart | Lines of the logo |
 | `console.banner.lines` | build, Java, CPU, memory | restart | Lines under the logo |
+| `branding.server-brand` | `''` | yes, for new joins | Name in the F3 screen and, with the version, in the server list for an incompatible client. `&` colors work, e.g. `'&6My&fServer'`. Empty keeps `Tessera`. A proxy may replace it |
 
 ## Branding the console
 
