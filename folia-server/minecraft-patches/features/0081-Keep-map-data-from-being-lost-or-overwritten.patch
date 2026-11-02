@@ -1,0 +1,94 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Mon, 2 Nov 2026 15:56:26 +0300
+Subject: [PATCH] Keep map data from being lost or overwritten
+
+Saved data was written in place, so a crash during the write left a cut-off file: a map that no longer loads, or a map index that starts over and hands the ids of existing maps to new ones, which then replace them. Files are now written to a temporary file and moved over the old one. The map saves of the global tick and the autosave share one write chain again; both changed it without a lock. A new map skips ids that already have data, so a map index that is behind the maps, for example after a crash, no longer overwrites map art.
+
+diff --git a/net/minecraft/server/level/ServerLevel.java b/net/minecraft/server/level/ServerLevel.java
+index c7a4e31be6b38d53c64944e48e53cc272e410393..a7585663003e1391a348e0f51872499b83fbf2c3 100644
+--- a/net/minecraft/server/level/ServerLevel.java
++++ b/net/minecraft/server/level/ServerLevel.java
+@@ -2762,7 +2762,22 @@ public class ServerLevel extends Level implements WorldGenLevel, ServerEntityGet
+     }
+ 
+     public MapId getFreeMapId() {
+-        return this.getServer().getDataStorage().computeIfAbsent(MapIndex.TYPE).getNextMapId();
++        // Tessera start - do not hand out map ids in use
++        // The map index is saved apart from the maps and from the players and chunks holding them; after a crash it
++        // can be behind them, and a new map would take the id, and the file, of an existing one
++        final net.minecraft.world.level.storage.SavedDataStorage storage = this.getServer().getDataStorage();
++        final MapIndex index = storage.computeIfAbsent(MapIndex.TYPE);
++        MapId id = index.getNextMapId();
++        int skipped = 0;
++        while (storage.hasData(MapItemSavedData.type(id))) {
++            ++skipped;
++            id = index.getNextMapId();
++        }
++        if (skipped > 0) {
++            LOGGER.warn("The map index was behind the saved maps; skipped {} map id(s) in use, the new map is #{}", skipped, id.id());
++        }
++        return id;
++        // Tessera end - do not hand out map ids in use
+     }
+ 
+     @Override
+diff --git a/net/minecraft/world/level/storage/SavedDataStorage.java b/net/minecraft/world/level/storage/SavedDataStorage.java
+index 531e6566f9c14b7c064e3651cb6c8acedc1e99eb..eb1c463fdcceef2af1dc7e035be9c8aad05a076b 100644
+--- a/net/minecraft/world/level/storage/SavedDataStorage.java
++++ b/net/minecraft/world/level/storage/SavedDataStorage.java
+@@ -187,7 +187,7 @@ public class SavedDataStorage implements AutoCloseable {
+     }
+ 
+     // Folia start - region threading
+-    public CompletableFuture<?> saveMaps() {
++    public synchronized CompletableFuture<?> saveMaps() { // Tessera - one write chain
+         Map<SavedDataType<?>, CompoundTag> savedData = new HashMap<>();
+         RegistryOps<Tag> registryOps = this.registries.createSerializationContext(NbtOps.INSTANCE);
+         for (Map.Entry<SavedDataType<?>, Optional<SavedData>> entry : this.cache.entrySet()) {
+@@ -221,7 +221,7 @@ public class SavedDataStorage implements AutoCloseable {
+     }
+     // Folia end - region threading
+ 
+-    public CompletableFuture<?> scheduleSave() {
++    public synchronized CompletableFuture<?> scheduleSave() { // Tessera - one write chain
+         if (this.closed) {
+             throw new IllegalStateException("Trying to schedule save when SavedDataStorage is already closed");
+         }
+@@ -289,12 +289,35 @@ public class SavedDataStorage implements AutoCloseable {
+ 
+         try {
+             FileUtil.createDirectoriesSafe(path.getParent());
+-            NbtIo.writeCompressed(tag, path);
++            // Tessera start - write saved data atomically
++            // Written in place, a crash during the write left a cut-off file: a lost map, or a lost map index that
++            // hands out the ids of existing maps again
++            final Path temp = path.resolveSibling(path.getFileName() + ".tmp");
++            NbtIo.writeCompressed(tag, temp);
++            try {
++                Files.move(temp, path, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
++            } catch (final java.nio.file.AtomicMoveNotSupportedException ex) {
++                Files.move(temp, path, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
++            }
++            // Tessera end - write saved data atomically
+         } catch (IOException e) {
+             LOGGER.error("Could not save data to {}", path.getFileName(), e);
+         }
+     }
+ 
++    // Tessera start - do not hand out map ids in use
++    /**
++     * Whether data of this type is loaded or saved, so its id is taken.
++     */
++    public boolean hasData(final SavedDataType<?> type) {
++        final Optional<SavedData> cached = this.cache.get(type);
++        if (cached != null && cached.isPresent()) {
++            return true;
++        }
++        return Files.exists(this.getDataFile(type.id()));
++    }
++    // Tessera end - do not hand out map ids in use
++
+     public void saveAndJoin() {
+         this.scheduleSave().join();
+     }

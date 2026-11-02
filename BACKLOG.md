@@ -32,20 +32,6 @@ The workflow, code rules and test harness are in [AGENTS.md](AGENTS.md); patch r
 
 ## P1 — visible to players
 
-### T-019 Corruption of drawn maps — [#177](https://github.com/PaperMC/Folia/issues/177)
-- **Why.** Affects ImageFrame on main.
-- **Where.** `MapItemSavedData` (map data shared with the server after #505), `HoldingPlayer`, `MapItem#update`. The map
-  is updated by several regions at once, `colors[]` and `dirty` are not synchronized.
-- **Done when.** A map hanging in frames in different regions and held by players does not get corrupted. Access to `MapItemSavedData`
-  is thread-safe or happens on a single owner.
-- **Checked (2026-10-30).** The hypothesis about unsynchronized `colors[]`/`dirty` is outdated: all access to
-  `MapItemSavedData`, `HoldingPlayer`, `CraftMapView` is under `synchronized`; `MapIndex` is atomic, `dirty` is volatile; maps
-  are written only from the global tick (0015), writes are chained. No cause found in the code. Fresh lead from the issue
-  (1.21.4): a locked map gets corrupted if you teleport without clicking it in the inventory. Needs a real client:
-  cartography table → lock → teleport to another region/world → look at the map and the `data/map_N.dat` file.
-  Also check: `ServerLevel#getMapData` calls `MapInitializeEvent` inside `ConcurrentHashMap.computeIfAbsent` —
-  a plugin that touches another map in the handler (ImageFrame) may get `Recursive update`.
-
 ### T-025 Villagers detect their workstation incorrectly — [#127](https://github.com/PaperMC/Folia/issues/127)
 - **Where.** `AssignProfessionFromJobSite`, `AcquirePoi`, `PoiManager` (adjacent to the already done AI and POI patches).
 
@@ -217,6 +203,7 @@ Folia regions are already isolated, the next step is spreading them across proce
 
 | What | Issue / PR | Patch |
 |---|---|---|
+| Map art no longer lost or overwritten (T-019): saved data is written to a temporary file and moved over the old one, map saves of the global tick and the autosave share one write chain, and a new map skips ids that already have data. Map index removed between two starts: old build gave the new map id 0 over the existing `maps/0.dat`, new build skipped 5 ids in use and took 5. Not checked, needs a real client: the lead from the issue about a locked map corrupted by a teleport before it is clicked in the inventory | #177 | 0081 |
 | Ender pearl: dimension change, stasis chambers, damager | #421, #438 | 0012 |
 | Debug subscriptions (MiniHUD) crashed the server | #472, #432 | 0013 |
 | `spawnRadius 0` | #401 | 0014 |
