@@ -18,12 +18,49 @@ index 13b03dab807c5d83e086993af705e1d9a2676b4d..80c7769c7f593e575444eedb3b7b2d83
          this.server = server;
      }
  
+diff --git a/src/main/java/io/papermc/paper/log/TesseraBanner.java b/src/main/java/io/papermc/paper/log/TesseraBanner.java
+index 17391494e5f86b92fa930929cb18288ff30548d1..cee58d9362b6f5c58cfb52f4db109c42f167a47b 100644
+--- a/src/main/java/io/papermc/paper/log/TesseraBanner.java
++++ b/src/main/java/io/papermc/paper/log/TesseraBanner.java
+@@ -29,7 +29,7 @@ public final class TesseraBanner {
+         "&3  |_|  |___||___/|___/|___||_|_\\/_/ \\_\\"
+     );
+     public static final List<String> DEFAULT_LINES = List.of(
+-        "&f{brand} &7{version} &8| &7Minecraft &f{minecraft}",
++        "&f{brand} &7{version} &8| &7Minecraft &f{minecraft}", // Tessera - server brand option
+         "&7Java {java} &8| &7{cpus} CPU threads &8| &7{memory} max heap",
+         ""
+     );
+@@ -67,12 +67,17 @@ public final class TesseraBanner {
+ 
+     private static Map<String, String> placeholders() {
+         final ServerBuildInfo build = ServerBuildInfo.buildInfo();
++        // Tessera start - server brand option
++        final Object configured = TesseraCompat.value("branding.server-brand");
++        final String brand = configured instanceof String string && !string.isBlank() ? string : build.brandName();
++        // Tessera end - server brand option
+         final long maxMemory = Runtime.getRuntime().maxMemory();
+         final String memory = maxMemory >= 1L << 30
+             ? String.format(Locale.ROOT, "%.1f GB", maxMemory / (double) (1L << 30))
+             : (maxMemory >> 20) + " MB";
+         return Map.of(
+-            "{brand}", build.brandName(),
++            "{brand}", brand, // Tessera - server brand option
++            "{core}", build.brandName(), // Tessera - server brand option
+             "{version}", build.asString(ServerBuildInfo.StringRepresentation.VERSION_SIMPLE),
+             "{minecraft}", SharedConstants.getCurrentVersion().name(),
+             "{java}", System.getProperty("java.version"),
 diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
-index c8f5c8b94e533b9c409a22ed37e5853ab355a54f..664e4cfb227b0293a8bd175609026922cba858b9 100644
+index c8f5c8b94e533b9c409a22ed37e5853ab355a54f..cdaa84b7af35b68ed8f602b3c9675994b8f640fe 100644
 --- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
 +++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
-@@ -84,8 +84,15 @@ public final class TesseraCompat {
-             Placeholders in both lists: {brand} {version} {minecraft} {java} {os} {cpus} {memory}.""")
+@@ -81,11 +81,19 @@ public final class TesseraCompat {
+             The logo and lines printed to the console at startup. Put your own ASCII art into logo to brand
+             the console; one entry per line, in single quotes. Colors: &0-&9 and &a-&f as in Minecraft,
+             &l bold, &o italic, &n underline, &r reset, &#rrggbb for terminals with true color.
+-            Placeholders in both lists: {brand} {version} {minecraft} {java} {os} {cpus} {memory}.""")
++            Placeholders in both lists: {brand} (branding.server-brand, or the build's name) {core} (the
++            build's name) {version} {minecraft} {java} {os} {cpus} {memory}.""") // Tessera - server brand option
          .bool("console.banner.enabled", true, true, "")
          .strings("console.banner.logo", io.papermc.paper.log.TesseraBanner.DEFAULT_LOGO, true, "")
 -        .strings("console.banner.lines", io.papermc.paper.log.TesseraBanner.DEFAULT_LINES, true, "");
@@ -39,7 +76,7 @@ index c8f5c8b94e533b9c409a22ed37e5853ab355a54f..664e4cfb227b0293a8bd175609026922
  
      private static volatile Path configFile;
      private static volatile Map<String, Object> values = CONFIG.defaults();
-@@ -198,6 +205,19 @@ public final class TesseraCompat {
+@@ -198,6 +206,19 @@ public final class TesseraCompat {
          return report;
      }
  

@@ -53,13 +53,14 @@ console:
       - '&e |_|  |_|\_, |  |___/\___|_|  \_/\___|_|   '
       - '&e         |__/                              '
     lines:
-      - '&fMy Server &7on {brand} {version}, Minecraft {minecraft}'
+      - '&f{brand} &7on {core} {version}, Minecraft {minecraft}'
       - '&7Java {java}, {cpus} CPU threads, {memory} heap'
 ```
 
 - Colors: `&0`-`&9` and `&a`-`&f` as in Minecraft, `&l` bold, `&o` italic, `&n` underline, `&r` reset, `&#rrggbb` for
   terminals with true color. A color resets bold and the like, as in the game. Without color support (`NO_COLOR`,
   `-Dterminal.ansi=false`, a plain pipe) the codes are dropped.
-- Placeholders: `{brand}` `{version}` `{minecraft}` `{java}` `{os}` `{cpus}` `{memory}`.
+- Placeholders: `{brand}` (`branding.server-brand` when set, otherwise `Tessera`), `{core}` (always the build's
+  name), `{version}` `{minecraft}` `{java}` `{os}` `{cpus}` `{memory}`.
 - In the console the banner has no time and level; `logs/latest.log` has it with them and without colors.
 - Any FIGlet generator gives usable art; fonts like *Small* or *Standard* fit an 80-column panel.
