@@ -1,0 +1,789 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Mon, 2 Nov 2026 15:24:45 +0300
+Subject: [PATCH] Keep tessera.yml up to date and report mistakes in it
+
+Options added by a newer build are written into an existing tessera.yml with their comments, so the file always lists everything that can be set; the previous file is kept as tessera.yml.old. Values of the wrong type, numbers out of range and unknown keys are reported in the console, unknown keys with the closest known one, and fall back to the default instead of being silently ignored. /tessera reload reads the file again and applies the options that can change while the server runs; the others are reported as needing a restart. Which plugins load in compatibility mode never changes after startup.
+
+diff --git a/src/main/java/io/papermc/paper/command/TesseraCommand.java b/src/main/java/io/papermc/paper/command/TesseraCommand.java
+index da2058db9f415f7ea6d3e16415b2f0a617922d60..16f556bc809544826a77f2771d86d4f64267e85d 100644
+--- a/src/main/java/io/papermc/paper/command/TesseraCommand.java
++++ b/src/main/java/io/papermc/paper/command/TesseraCommand.java
+@@ -31,9 +31,9 @@ public final class TesseraCommand extends Command {
+ 
+     public TesseraCommand() {
+         super("tessera");
+-        this.setUsage("/<command> compat [plugin|dump|reset]");
+-        this.setDescription("Tessera tools: the compatibility mode report.");
+-        this.setPermission("tessera.command.compat");
++        this.setUsage("/<command> compat [plugin|dump|reset] | reload"); // Tessera - self-updating tessera.yml
++        this.setDescription("Tessera tools: the compatibility mode report, reloading tessera.yml."); // Tessera - self-updating tessera.yml
++        this.setPermission("tessera.command.compat;tessera.command.reload"); // Tessera - self-updating tessera.yml
+     }
+ 
+     @Override
+@@ -41,10 +41,16 @@ public final class TesseraCommand extends Command {
+         if (!this.testPermission(sender)) {
+             return true;
+         }
+-        if (args.length < 1 || !args[0].equalsIgnoreCase("compat")) {
+-            sender.sendMessage(Component.text("Usage: /" + commandLabel + " compat [plugin|dump|reset]", NamedTextColor.RED));
++        // Tessera start - self-updating tessera.yml
++        if (args.length == 1 && args[0].equalsIgnoreCase("reload") && sender.hasPermission("tessera.command.reload")) {
++            this.reload(sender);
+             return true;
+         }
++        if (args.length < 1 || !args[0].equalsIgnoreCase("compat") || !sender.hasPermission("tessera.command.compat")) {
++            sender.sendMessage(Component.text("Usage: /" + commandLabel + " compat [plugin|dump|reset] | reload", NamedTextColor.RED));
++            return true;
++        }
++        // Tessera end - self-updating tessera.yml
+         if (args.length < 2) {
+             this.summary(sender);
+         } else if (args[1].equalsIgnoreCase("reset")) {
+@@ -58,6 +64,21 @@ public final class TesseraCommand extends Command {
+         return true;
+     }
+ 
++    // Tessera start - self-updating tessera.yml
++    private void reload(final CommandSender sender) {
++        final List<String> report = io.papermc.paper.threadedregions.TesseraCompat.reload();
++        if (report.isEmpty()) {
++            sender.sendMessage(Component.text("tessera.yml reloaded, nothing changed.", NamedTextColor.GREEN));
++            return;
++        }
++        sender.sendMessage(Component.text("tessera.yml reloaded:", NamedTextColor.GOLD));
++        for (final String line : report) {
++            sender.sendMessage(Component.text("  " + line, line.startsWith("!") ? NamedTextColor.RED
++                : line.endsWith("(after a restart)") ? NamedTextColor.YELLOW : NamedTextColor.GREEN));
++        }
++    }
++    // Tessera end - self-updating tessera.yml
++
+     private static Map<String, List<Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry>>> byPlugin() {
+         final Map<String, List<Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry>>> map = new LinkedHashMap<>();
+         for (final Map.Entry<TesseraCompatReport.Key, TesseraCompatReport.Entry> entry : TesseraCompatReport.entries()) {
+@@ -148,7 +169,7 @@ public final class TesseraCommand extends Command {
+     @Override
+     public List<String> tabComplete(final CommandSender sender, final String alias, final String[] args) {
+         if (args.length == 1) {
+-            return io.papermc.paper.threadedregions.commands.CommandUtil.getSortedList(List.of("compat"), args[0]);
++            return io.papermc.paper.threadedregions.commands.CommandUtil.getSortedList(List.of("compat", "reload"), args[0]); // Tessera - self-updating tessera.yml
+         }
+         if (args.length == 2 && args[0].equalsIgnoreCase("compat")) {
+             final List<String> options = new ArrayList<>(List.of("dump", "reset"));
+diff --git a/src/main/java/io/papermc/paper/configuration/TesseraConfigFile.java b/src/main/java/io/papermc/paper/configuration/TesseraConfigFile.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..db4778059398dafafb786c0f836212a497db2439
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/configuration/TesseraConfigFile.java
+@@ -0,0 +1,438 @@
++package io.papermc.paper.configuration;
++
++import java.io.IOException;
++import java.io.Reader;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.nio.file.StandardCopyOption;
++import java.util.ArrayList;
++import java.util.LinkedHashMap;
++import java.util.LinkedHashSet;
++import java.util.List;
++import java.util.Locale;
++import java.util.Map;
++import java.util.Set;
++import java.util.regex.Pattern;
++import org.slf4j.Logger;
++import org.yaml.snakeyaml.DumperOptions;
++import org.yaml.snakeyaml.Yaml;
++import org.yaml.snakeyaml.error.YAMLException;
++
++// Tessera start - self-updating tessera.yml
++/**
++ * The options of {@code tessera.yml}, with their defaults and comments.
++ * <p>
++ * Loading checks every value against its option and warns about values of the wrong type, numbers out of range
++ * and unknown keys (with the closest known key, for typos); such values fall back to the default. Options missing
++ * from the file, for example ones added by a newer build, are written into it with their comments, so the file
++ * always lists everything that can be set. The rewrite keeps the values, also wrong ones and unknown keys, but not
++ * comments of the admin; the previous file is kept next to it as {@code tessera.yml.old}.
++ */
++public final class TesseraConfigFile {
++
++    public enum Kind { BOOLEAN, INT, DOUBLE, STRING, STRING_LIST }
++
++    /**
++     * @param restart whether a changed value takes effect only after a restart, for {@code /tessera reload}
++     */
++    public record Option(String path, Kind kind, Object def, double min, double max, List<String> choices,
++                         boolean restart, List<String> comment) {
++    }
++
++    public record Result(Map<String, Object> values, List<String> problems, List<String> added, boolean written) {
++    }
++
++    private static final Pattern PLAIN = Pattern.compile("[A-Za-z][A-Za-z0-9_./-]*");
++    private static final Set<String> RESERVED = Set.of("true", "false", "yes", "no", "on", "off", "null", "y", "n");
++
++    private final List<String> header;
++    private final Map<String, List<String>> groupComments = new LinkedHashMap<>();
++    private final Map<String, Option> options = new LinkedHashMap<>();
++
++    public TesseraConfigFile(final String header) {
++        this.header = lines(header);
++    }
++
++    public TesseraConfigFile group(final String path, final String comment) {
++        this.groupComments.put(path, lines(comment));
++        return this;
++    }
++
++    public TesseraConfigFile bool(final String path, final boolean def, final boolean restart, final String comment) {
++        return this.add(new Option(path, Kind.BOOLEAN, def, 0, 0, List.of(), restart, lines(comment)));
++    }
++
++    public TesseraConfigFile integer(final String path, final int def, final int min, final int max, final boolean restart, final String comment) {
++        return this.add(new Option(path, Kind.INT, def, min, max, List.of(), restart, lines(comment)));
++    }
++
++    public TesseraConfigFile decimal(final String path, final double def, final double min, final double max, final boolean restart, final String comment) {
++        return this.add(new Option(path, Kind.DOUBLE, def, min, max, List.of(), restart, lines(comment)));
++    }
++
++    public TesseraConfigFile choice(final String path, final String def, final List<String> choices, final boolean restart, final String comment) {
++        return this.add(new Option(path, Kind.STRING, def, 0, 0, List.copyOf(choices), restart, lines(comment)));
++    }
++
++    public TesseraConfigFile text(final String path, final String def, final boolean restart, final String comment) {
++        return this.add(new Option(path, Kind.STRING, def, 0, 0, List.of(), restart, lines(comment)));
++    }
++
++    public TesseraConfigFile strings(final String path, final List<String> def, final boolean restart, final String comment) {
++        return this.add(new Option(path, Kind.STRING_LIST, List.copyOf(def), 0, 0, List.of(), restart, lines(comment)));
++    }
++
++    private TesseraConfigFile add(final Option option) {
++        this.options.put(option.path(), option);
++        return this;
++    }
++
++    public Map<String, Option> options() {
++        return this.options;
++    }
++
++    public Map<String, Object> defaults() {
++        final Map<String, Object> values = new LinkedHashMap<>();
++        this.options.values().forEach(option -> values.put(option.path(), option.def()));
++        return values;
++    }
++
++    /**
++     * Reads the file, creating it or adding missing options to it. On a file that is not valid YAML every option
++     * keeps its default and the file is left alone.
++     */
++    public Result load(final Path file, final Logger logger) {
++        final List<String> problems = new ArrayList<>();
++        if (Files.notExists(file)) {
++            try {
++                if (file.getParent() != null) {
++                    Files.createDirectories(file.getParent());
++                }
++                Files.writeString(file, this.render(Map.of()));
++                return new Result(this.defaults(), problems, List.of(), true);
++            } catch (final IOException ex) {
++                logger.error("Could not create {}, using the defaults", file, ex);
++                return new Result(this.defaults(), problems, List.of(), false);
++            }
++        }
++
++        final Object root;
++        try (final Reader reader = Files.newBufferedReader(file)) {
++            root = new Yaml().load(reader);
++        } catch (final IOException | YAMLException ex) {
++            logger.error("Could not read {}, using the defaults for every option: {}", file, ex.getMessage());
++            return new Result(this.defaults(), problems, List.of(), false);
++        }
++        final Map<?, ?> user = root instanceof Map<?, ?> map ? map : Map.of();
++        if (root != null && !(root instanceof Map<?, ?>)) {
++            problems.add("the file is not a list of options, using the defaults");
++        }
++
++        final Map<String, Object> values = new LinkedHashMap<>();
++        final List<String> added = new ArrayList<>();
++        for (final Option option : this.options.values()) {
++            final Lookup raw = lookup(user, option.path());
++            if (!raw.found()) {
++                added.add(option.path());
++                values.put(option.path(), option.def());
++                continue;
++            }
++            values.put(option.path(), this.convert(option, raw.value(), problems));
++        }
++        this.findUnknown(user, "", problems);
++
++        boolean written = false;
++        if (!added.isEmpty() && (root == null || root instanceof Map<?, ?>)) {
++            try {
++                Files.copy(file, file.resolveSibling(file.getFileName() + ".old"), StandardCopyOption.REPLACE_EXISTING);
++                Files.writeString(file, this.render(user));
++                written = true;
++            } catch (final IOException ex) {
++                logger.error("Could not add the new options to {}", file, ex);
++            }
++        }
++        return new Result(values, problems, added, written);
++    }
++
++    private Object convert(final Option option, final Object raw, final List<String> problems) {
++        final String path = option.path();
++        switch (option.kind()) {
++            case BOOLEAN -> {
++                if (raw instanceof Boolean bool) {
++                    return bool;
++                }
++                if (raw instanceof String string && (string.equalsIgnoreCase("true") || string.equalsIgnoreCase("false"))) {
++                    return Boolean.parseBoolean(string);
++                }
++                problems.add(path + ": expected true or false, got " + describe(raw) + "; using " + option.def());
++                return option.def();
++            }
++            case INT, DOUBLE -> {
++                Number number = raw instanceof Number n ? n : null;
++                if (number == null && raw instanceof String string) {
++                    try {
++                        number = Double.parseDouble(string.trim());
++                    } catch (final NumberFormatException ignored) {
++                        // reported below
++                    }
++                }
++                if (number == null || option.kind() == Kind.INT && number.doubleValue() != Math.rint(number.doubleValue())) {
++                    problems.add(path + ": expected " + (option.kind() == Kind.INT ? "a whole number" : "a number")
++                        + ", got " + describe(raw) + "; using " + option.def());
++                    return option.def();
++                }
++                double value = number.doubleValue();
++                if (value < option.min() || value > option.max()) {
++                    final double clamped = Math.max(option.min(), Math.min(option.max(), value));
++                    problems.add(path + ": " + format(number) + " is out of range " + format(option.min()) + ".."
++                        + format(option.max()) + "; using " + format(clamped));
++                    value = clamped;
++                }
++                return option.kind() == Kind.INT ? (Object) (int) value : (Object) value;
++            }
++            case STRING -> {
++                if (raw instanceof Map<?, ?> || raw instanceof List<?>) {
++                    problems.add(path + ": expected a single value, got " + describe(raw) + "; using " + option.def());
++                    return option.def();
++                }
++                final String value = raw == null ? "" : raw.toString().trim();
++                if (option.choices().isEmpty()) {
++                    return raw == null ? option.def() : raw.toString();
++                }
++                for (final String choice : option.choices()) {
++                    if (choice.equalsIgnoreCase(value)) {
++                        return choice;
++                    }
++                }
++                problems.add(path + ": expected one of " + String.join(", ", option.choices()) + ", got " + describe(raw)
++                    + "; using " + option.def());
++                return option.def();
++            }
++            case STRING_LIST -> {
++                if (raw == null) {
++                    return List.of();
++                }
++                if (raw instanceof List<?> list) {
++                    final List<String> strings = new ArrayList<>();
++                    for (final Object entry : list) {
++                        if (entry instanceof Map<?, ?> || entry instanceof List<?>) {
++                            problems.add(path + ": expected a list of values, an entry is " + describe(entry) + "; skipped");
++                        } else if (entry != null) {
++                            strings.add(entry.toString());
++                        }
++                    }
++                    return List.copyOf(strings);
++                }
++                if (raw instanceof Map<?, ?>) {
++                    problems.add(path + ": expected a list, got " + describe(raw) + "; using " + option.def());
++                    return option.def();
++                }
++                return List.of(raw.toString());
++            }
++        }
++        throw new IllegalStateException(option.kind().name());
++    }
++
++    private void findUnknown(final Map<?, ?> map, final String prefix, final List<String> problems) {
++        for (final Map.Entry<?, ?> entry : map.entrySet()) {
++            final String path = prefix + entry.getKey();
++            if (this.options.containsKey(path)) {
++                continue;
++            }
++            if (this.isGroup(path)) {
++                if (entry.getValue() instanceof Map<?, ?> child) {
++                    this.findUnknown(child, path + ".", problems);
++                } else {
++                    problems.add(path + ": expected a section of options, got " + describe(entry.getValue()) + "; using the defaults");
++                }
++                continue;
++            }
++            final String closest = this.closest(prefix, path);
++            problems.add("unknown option " + path + (closest == null ? "" : " (did you mean " + closest + "?)") + ", ignored");
++        }
++    }
++
++    private boolean isGroup(final String path) {
++        final String prefix = path + ".";
++        for (final String option : this.options.keySet()) {
++            if (option.startsWith(prefix)) {
++                return true;
++            }
++        }
++        return false;
++    }
++
++    private String closest(final String prefix, final String path) {
++        String best = null;
++        int bestDistance = Integer.MAX_VALUE;
++        final Set<String> candidates = new LinkedHashSet<>(this.options.keySet());
++        for (final String option : this.options.keySet()) {
++            for (int dot = option.indexOf('.'); dot > 0; dot = option.indexOf('.', dot + 1)) {
++                candidates.add(option.substring(0, dot));
++            }
++        }
++        final String key = path.substring(prefix.length()).toLowerCase(Locale.ROOT);
++        for (final String candidate : candidates) {
++            // a key in the same section, or the same key in another section
++            final boolean sameSection = candidate.startsWith(prefix) && candidate.indexOf('.', prefix.length()) < 0;
++            final String candidateKey = candidate.substring(candidate.lastIndexOf('.') + 1);
++            final int distance = sameSection ? distance(key, candidateKey) : candidateKey.equalsIgnoreCase(key) ? 0 : Integer.MAX_VALUE;
++            if (distance < bestDistance) {
++                bestDistance = distance;
++                best = candidate;
++            }
++        }
++        return bestDistance <= Math.max(2, key.length() / 3) ? best : null;
++    }
++
++    static int distance(final String a, final String b) {
++        final int[] previous = new int[b.length() + 1];
++        final int[] current = new int[b.length() + 1];
++        for (int j = 0; j <= b.length(); ++j) {
++            previous[j] = j;
++        }
++        for (int i = 1; i <= a.length(); ++i) {
++            current[0] = i;
++            for (int j = 1; j <= b.length(); ++j) {
++                final int cost = a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1;
++                current[j] = Math.min(Math.min(current[j - 1] + 1, previous[j] + 1), previous[j - 1] + cost);
++            }
++            System.arraycopy(current, 0, previous, 0, current.length);
++        }
++        return previous[b.length()];
++    }
++
++    private record Lookup(boolean found, Object value) {
++    }
++
++    private static Lookup lookup(final Map<?, ?> root, final String path) {
++        Object node = root;
++        for (final String part : path.split("\\.")) {
++            if (!(node instanceof Map<?, ?> map) || !map.containsKey(part)) {
++                return new Lookup(false, null);
++            }
++            node = map.get(part);
++        }
++        return new Lookup(true, node);
++    }
++
++    /**
++     * The file with every option: the value from {@code user} where it has one, the default otherwise, and the
++     * unknown keys of {@code user} after the known ones of their section.
++     */
++    public String render(final Map<?, ?> user) {
++        final StringBuilder out = new StringBuilder();
++        for (final String line : this.header) {
++            out.append(line.isEmpty() ? "#" : "# " + line).append('\n');
++        }
++        this.renderGroup("", 0, user, out);
++        return out.toString();
++    }
++
++    private void renderGroup(final String prefix, final int indent, final Map<?, ?> user, final StringBuilder out) {
++        final String pad = " ".repeat(indent);
++        final Set<String> children = new LinkedHashSet<>();
++        for (final String path : this.options.keySet()) {
++            if (path.startsWith(prefix)) {
++                final int dot = path.indexOf('.', prefix.length());
++                children.add(dot < 0 ? path.substring(prefix.length()) : path.substring(prefix.length(), dot));
++            }
++        }
++        for (final String child : children) {
++            final String path = prefix + child;
++            final Option option = this.options.get(path);
++            final List<String> comment = option != null ? option.comment() : this.groupComments.getOrDefault(path, List.of());
++            if (indent == 0) {
++                out.append('\n');
++            }
++            for (final String line : comment) {
++                out.append(pad).append(line.isEmpty() ? "#" : "# " + line).append('\n');
++            }
++            final Object userValue = user.get(child);
++            if (option == null) {
++                out.append(pad).append(child).append(":\n");
++                this.renderGroup(path + ".", indent + 2, userValue instanceof Map<?, ?> map ? map : Map.of(), out);
++            } else {
++                final Object value = user.containsKey(child) ? userValue : option.def();
++                out.append(pad).append(child).append(':').append(renderValue(value, indent)).append('\n');
++            }
++        }
++        for (final Map.Entry<?, ?> entry : user.entrySet()) {
++            final String key = String.valueOf(entry.getKey());
++            if (!children.contains(key)) {
++                out.append(pad).append(scalar(key)).append(':').append(renderValue(entry.getValue(), indent)).append('\n');
++            }
++        }
++    }
++
++    private static String renderValue(final Object value, final int indent) {
++        if (value instanceof List<?> list) {
++            if (list.isEmpty()) {
++                return " []";
++            }
++            final StringBuilder out = new StringBuilder();
++            for (final Object entry : list) {
++                out.append('\n').append(" ".repeat(indent + 2)).append("- ").append(entry instanceof Map<?, ?> || entry instanceof List<?>
++                    ? dump(entry, indent + 4).stripLeading() : scalar(entry));
++            }
++            return out.toString();
++        }
++        if (value instanceof Map<?, ?> map) {
++            return map.isEmpty() ? " {}" : "\n" + dump(map, indent + 2).stripTrailing();
++        }
++        return " " + scalar(value);
++    }
++
++    private static String dump(final Object value, final int indent) {
++        final DumperOptions options = new DumperOptions();
++        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
++        options.setIndent(2);
++        final String pad = " ".repeat(indent);
++        final StringBuilder out = new StringBuilder();
++        for (final String line : new Yaml(options).dump(value).split("\n")) {
++            out.append(pad).append(line).append('\n');
++        }
++        return out.toString();
++    }
++
++    static String scalar(final Object value) {
++        if (value == null) {
++            return "null";
++        }
++        if (value instanceof Boolean || value instanceof Integer || value instanceof Long) {
++            return value.toString();
++        }
++        if (value instanceof Number number) {
++            return format(number);
++        }
++        final String string = value.toString();
++        if (PLAIN.matcher(string).matches() && !RESERVED.contains(string.toLowerCase(Locale.ROOT))) {
++            return string;
++        }
++        return "'" + string.replace("'", "''") + "'";
++    }
++
++    private static String format(final Number number) {
++        final double value = number.doubleValue();
++        return value == Math.rint(value) && Math.abs(value) < 1e15 ? Long.toString((long) value) : Double.toString(value);
++    }
++
++    private static String format(final double value) {
++        return format((Number) value);
++    }
++
++    private static String describe(final Object value) {
++        if (value instanceof Map<?, ?>) {
++            return "a section";
++        }
++        if (value instanceof List<?>) {
++            return "a list";
++        }
++        return value == null ? "nothing" : "'" + value + "'";
++    }
++
++    private static List<String> lines(final String text) {
++        return text == null || text.isEmpty() ? List.of() : List.of(text.stripTrailing().split("\n", -1));
++    }
++}
++// Tessera end - self-updating tessera.yml
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index fb72c0a5561e2f2d90c587acc80853a112563ee5..6e637edc3d7e22a61f79477879fe91b6eb3fd7e5 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -3,9 +3,6 @@ package io.papermc.paper.threadedregions;
+ import com.mojang.brigadier.ParseResults;
+ import com.mojang.brigadier.context.ParsedCommandNode;
+ import com.mojang.logging.LogUtils;
+-import java.io.IOException;
+-import java.io.Reader;
+-import java.nio.file.Files;
+ import java.nio.file.Path;
+ import java.util.HashSet;
+ import java.util.List;
+@@ -22,8 +19,6 @@ import org.bukkit.command.CommandSender;
+ import org.bukkit.command.PluginIdentifiableCommand;
+ import org.bukkit.plugin.Plugin;
+ import org.slf4j.Logger;
+-import org.yaml.snakeyaml.Yaml;
+-import org.yaml.snakeyaml.error.YAMLException;
+ 
+ /**
+  * Compatibility mode for plugins that are not marked as supporting Folia.
+@@ -35,43 +30,50 @@ import org.yaml.snakeyaml.error.YAMLException;
+ public final class TesseraCompat {
+ 
+     private static final Logger LOGGER = LogUtils.getClassLogger();
+-    private static final String DEFAULT_CONFIG = """
+-        # Tessera settings.
++    // Tessera start - self-updating tessera.yml
++    public static final io.papermc.paper.configuration.TesseraConfigFile CONFIG = new io.papermc.paper.configuration.TesseraConfigFile("""
++        Tessera settings.
+ 
+-        compat:
+-          # Plugins that are not marked as supporting Folia (folia-supported: true) but are loaded anyway,
+-          # by plugin name, or "*" for all of them. Their BukkitScheduler tasks and commands run on the
+-          # global region thread and can use blocks and entities in loaded chunks: the regions they touch
+-          # are paused for the duration of the task.
+-          plugins: []
++        Options missing here are added with their defaults when the server starts, so this file always
++        lists everything that can be set. Wrong values and unknown keys are reported in the console.
++        /tessera reload applies most changes without a restart.
++        """)
++        .group("compat", "")
++        .strings("compat.plugins", List.of(), true, """
++            Plugins that are not marked as supporting Folia (folia-supported: true) but are loaded anyway,
++            by plugin name, or "*" for all of them. Their BukkitScheduler tasks and commands run on the
++            global region thread and can use blocks and entities in loaded chunks: the regions they touch
++            are paused for the duration of the task.""")
++        .group("performance", "")
++        .bool("performance.poi-searches-load-chunks", true, false, """
++            Villagers looking for a job site, bed or meeting point read POI data from disk when it is not
++            loaded, which stalls the region. false searches loaded chunks only.""")
++        .bool("performance.light-entities", false, false, """
++            Armor stands that are markers or have no gravity run a full tick once a second, or every tick while
++            burning, riding, carrying a passenger, in a portal or under an effect. Viewers of these stands and of
++            display entities are recomputed every light-entity-tracker-interval ticks, so they appear and
++            disappear that much later.""")
++        .integer("performance.light-entity-tracker-interval", 5, 1, 200, false, "")
++        .bool("performance.distant-mob-ai", false, false, """
++            Mobs further than distant-mob-ai-start-distance blocks from the nearest player pick new goals and run
++            sensors less often: every (distance * distance / 256) ticks, at most distant-mob-ai-max-interval.
++            Running goals, movement and memory timers still tick every tick, and mobs with a target or that
++            were just hurt are not affected. Distant farms react later. Mobs outside the entity activation range
++            are throttled by it instead. distant-mob-ai-exclude lists entity types to leave alone, for example
++            [villager, minecraft:piglin].""")
++        .decimal("performance.distant-mob-ai-start-distance", 12, 0, 1024, false, "")
++        .integer("performance.distant-mob-ai-max-interval", 20, 1, 1200, false, "")
++        .strings("performance.distant-mob-ai-exclude", List.of(), true, "")
++        .bool("performance.async-entity-tracker", false, false, """
++            Regions with many players and entities close together find out which entities gained or lost a viewer
++            on a small thread pool, and the region waits for it. Only the check moves: adding and removing viewers
++            and sending packets stay on the region thread. async-entity-tracker-threads 0 picks a quarter of the
++            CPU threads, at most 4.""")
++        .integer("performance.async-entity-tracker-threads", 0, 0, 64, true, "");
+ 
+-        performance:
+-          # Villagers looking for a job site, bed or meeting point read POI data from disk when it is not
+-          # loaded, which stalls the region. false searches loaded chunks only.
+-          poi-searches-load-chunks: true
+-          # Armor stands that are markers or have no gravity run a full tick once a second, or every tick while
+-          # burning, riding, carrying a passenger, in a portal or under an effect. Viewers of these stands and of
+-          # display entities are recomputed every light-entity-tracker-interval ticks, so they appear and
+-          # disappear that much later.
+-          light-entities: false
+-          light-entity-tracker-interval: 5
+-          # Mobs further than distant-mob-ai-start-distance blocks from the nearest player pick new goals and run
+-          # sensors less often: every (distance * distance / 256) ticks, at most distant-mob-ai-max-interval.
+-          # Running goals, movement and memory timers still tick every tick, and mobs with a target or that
+-          # were just hurt are not affected. Distant farms react later. Mobs outside the entity activation range
+-          # are throttled by it instead. distant-mob-ai-exclude lists entity types to leave alone, for example
+-          # [villager, minecraft:piglin].
+-          distant-mob-ai: false
+-          distant-mob-ai-start-distance: 12
+-          distant-mob-ai-max-interval: 20
+-          distant-mob-ai-exclude: []
+-          # Regions with many players and entities close together find out which entities gained or lost a viewer
+-          # on a small thread pool, and the region waits for it. Only the check moves: adding and removing viewers
+-          # and sending packets stay on the region thread. async-entity-tracker-threads 0 picks a quarter of the
+-          # CPU threads, at most 4.
+-          async-entity-tracker: false
+-          async-entity-tracker-threads: 0
+-        """;
++    private static volatile Path configFile;
++    private static volatile Map<String, Object> values = CONFIG.defaults();
++    // Tessera end - self-updating tessera.yml
+ 
+     private static volatile Set<String> plugins = Set.of();
+     private static volatile boolean allPlugins;
+@@ -88,70 +90,105 @@ public final class TesseraCompat {
+     private TesseraCompat() {
+     }
+ 
++    // Tessera start - self-updating tessera.yml
+     public static void load(final Path file) {
+-        try {
+-            if (Files.notExists(file)) {
+-                if (file.getParent() != null) {
+-                    Files.createDirectories(file.getParent());
+-                }
+-                Files.writeString(file, DEFAULT_CONFIG);
++        configFile = file;
++        final io.papermc.paper.configuration.TesseraConfigFile.Result result = read(file);
++        // which plugins may load is decided once: compatibility mode cannot be taken from a loaded plugin
++        final Set<String> names = new HashSet<>();
++        boolean all = false;
++        for (final String entry : stringList(result.values(), "compat.plugins")) {
++            final String name = entry.trim();
++            if (name.equals("*")) {
++                all = true;
++            } else if (!name.isEmpty()) {
++                names.add(name.toLowerCase(Locale.ROOT));
+             }
+-
+-            final Object root;
+-            try (final Reader reader = Files.newBufferedReader(file)) {
+-                root = new Yaml().load(reader);
++        }
++        plugins = Set.copyOf(names);
++        allPlugins = all;
++        final Set<String> excluded = new HashSet<>();
++        for (final String entry : stringList(result.values(), "performance.distant-mob-ai-exclude")) {
++            final String type = entry.trim().toLowerCase(Locale.ROOT);
++            if (!type.isEmpty()) {
++                excluded.add(type.indexOf(':') < 0 ? "minecraft:" + type : type);
+             }
++        }
++        distantMobAiExcluded = Set.copyOf(excluded);
++        asyncEntityTrackerThreads = (Integer) result.values().get("performance.async-entity-tracker-threads");
++        apply(result.values());
++    }
+ 
+-            final Set<String> names = new HashSet<>();
+-            boolean all = false;
+-            if (root instanceof Map<?, ?> map && map.get("compat") instanceof Map<?, ?> compat
+-                && compat.get("plugins") instanceof List<?> list) {
+-                for (final Object entry : list) {
+-                    final String name = entry == null ? "" : entry.toString().trim();
+-                    if (name.equals("*")) {
+-                        all = true;
+-                    } else if (!name.isEmpty()) {
+-                        names.add(name.toLowerCase(Locale.ROOT));
+-                    }
+-                }
++    private static io.papermc.paper.configuration.TesseraConfigFile.Result read(final Path file) {
++        final io.papermc.paper.configuration.TesseraConfigFile.Result result = CONFIG.load(file, LOGGER);
++        if (result.written() && !result.added().isEmpty()) {
++            LOGGER.info("Added {} new option(s) to {} with their defaults: {}. The previous file is {}.old",
++                result.added().size(), file, String.join(", ", result.added()), file.getFileName());
++        }
++        for (final String problem : result.problems()) {
++            LOGGER.warn("{}: {}", file.getFileName(), problem);
++        }
++        return result;
++    }
++
++    @SuppressWarnings("unchecked")
++    private static List<String> stringList(final Map<String, Object> values, final String path) {
++        return (List<String>) values.get(path);
++    }
++
++    /** Options that take effect at once. */
++    private static void apply(final Map<String, Object> config) {
++        values = Map.copyOf(config);
++        poiSearchesLoadChunks = (Boolean) config.get("performance.poi-searches-load-chunks");
++        final boolean light = (Boolean) config.get("performance.light-entities");
++        lightEntities = light;
++        lightEntityTrackerInterval = light ? (Integer) config.get("performance.light-entity-tracker-interval") : 1;
++        final double distance = (Double) config.get("performance.distant-mob-ai-start-distance");
++        distantMobAiStartDistanceSquared = distance * distance;
++        distantMobAiMaxInterval = (Integer) config.get("performance.distant-mob-ai-max-interval");
++        distantMobAi = (Boolean) config.get("performance.distant-mob-ai");
++        asyncEntityTracker = (Boolean) config.get("performance.async-entity-tracker");
++    }
++
++    /**
++     * Reads {@code tessera.yml} again and applies what can change while the server runs. Returns the changed options,
++     * each followed by whether it was applied or needs a restart; problems with the file are logged and returned too.
++     */
++    public static List<String> reload() {
++        final Path file = configFile;
++        if (file == null) {
++            return List.of("tessera.yml was not loaded at startup");
++        }
++        final Map<String, Object> before = values;
++        final io.papermc.paper.configuration.TesseraConfigFile.Result result = read(file);
++        final List<String> report = new java.util.ArrayList<>();
++        for (final String problem : result.problems()) {
++            report.add("! " + problem);
++        }
++        for (final io.papermc.paper.configuration.TesseraConfigFile.Option option : CONFIG.options().values()) {
++            final Object old = before.get(option.path());
++            final Object now = result.values().get(option.path());
++            if (!java.util.Objects.equals(old, now)) {
++                report.add(option.path() + ": " + old + " -> " + now + (option.restart() ? " (after a restart)" : ""));
+             }
+-            plugins = Set.copyOf(names);
+-            allPlugins = all;
+-            poiSearchesLoadChunks = !(root instanceof Map<?, ?> rootMap && rootMap.get("performance") instanceof Map<?, ?> performance
+-                && Boolean.FALSE.equals(performance.get("poi-searches-load-chunks")));
+-            final boolean light = root instanceof Map<?, ?> rootMap && rootMap.get("performance") instanceof Map<?, ?> performance
+-                && Boolean.TRUE.equals(performance.get("light-entities"));
+-            lightEntities = light;
+-            lightEntityTrackerInterval = !light ? 1
+-                : root instanceof Map<?, ?> rootMap && rootMap.get("performance") instanceof Map<?, ?> performance
+-                    && performance.get("light-entity-tracker-interval") instanceof Number interval ? Math.max(1, interval.intValue()) : 5;
+-            if (root instanceof Map<?, ?> rootMap && rootMap.get("performance") instanceof Map<?, ?> performance) {
+-                if (performance.get("distant-mob-ai-start-distance") instanceof Number distance) {
+-                    distantMobAiStartDistanceSquared = distance.doubleValue() * distance.doubleValue();
+-                }
+-                if (performance.get("distant-mob-ai-max-interval") instanceof Number interval) {
+-                    distantMobAiMaxInterval = Math.max(1, interval.intValue());
+-                }
+-                final Set<String> excluded = new HashSet<>();
+-                if (performance.get("distant-mob-ai-exclude") instanceof List<?> list) {
+-                    for (final Object entry : list) {
+-                        final String type = entry == null ? "" : entry.toString().trim().toLowerCase(Locale.ROOT);
+-                        if (!type.isEmpty()) {
+-                            excluded.add(type.indexOf(':') < 0 ? "minecraft:" + type : type);
+-                        }
+-                    }
+-                }
+-                distantMobAiExcluded = Set.copyOf(excluded);
+-                distantMobAi = Boolean.TRUE.equals(performance.get("distant-mob-ai"));
+-                asyncEntityTracker = Boolean.TRUE.equals(performance.get("async-entity-tracker"));
+-                if (performance.get("async-entity-tracker-threads") instanceof Number threads) {
+-                    asyncEntityTrackerThreads = threads.intValue();
+-                }
++        }
++        final Map<String, Object> applied = new java.util.HashMap<>(result.values());
++        for (final io.papermc.paper.configuration.TesseraConfigFile.Option option : CONFIG.options().values()) {
++            if (option.restart()) {
++                applied.put(option.path(), before.get(option.path())); // keep what is in effect
+             }
+-        } catch (final IOException | YAMLException ex) {
+-            LOGGER.error("Could not read {}, compatibility mode is off", file, ex);
+         }
++        apply(applied);
++        return report;
++    }
++
++    /**
++     * The value in effect of an option of {@code tessera.yml}.
++     */
++    public static Object value(final String path) {
++        return values.get(path);
+     }
++    // Tessera end - self-updating tessera.yml
+ 
+     /**
+      * Returns whether POI searches of mobs may load POI data from disk.

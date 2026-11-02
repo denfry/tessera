@@ -66,6 +66,8 @@ Plugins without the flag can be loaded in compatibility mode: list them under `c
 thread. Such a task or command can read and change blocks and entities in loaded chunks: the regions it touches
 are paused until it finishes (see [COMPAT.md](COMPAT.md)). Plugins marked as Folia supported are not affected.
 
+Every option of `config/tessera.yml`, `/tessera reload` and branding the console banner: [CONFIG.md](CONFIG.md).
+
 ## Download
 
 Builds are published on the [Releases](https://github.com/denfry/tessera/releases) page as
