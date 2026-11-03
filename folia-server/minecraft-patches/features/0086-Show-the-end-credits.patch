@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Tue, 3 Nov 2026 11:15:44 +0300
+Subject: [PATCH] Show the end credits
+
+Folia marked every player as having seen the credits and moved them
+straight to the overworld, because a player waiting in the credits would
+stay in the End region. Respawn the player in the overworld first, then
+send the credits once the client has loaded the level. Closing the
+credits sends PERFORM_RESPAWN, which does nothing for a living player
+outside the credits. The credits are still shown only once, and not at
+all with disable-end-credits.
+
+diff --git a/net/minecraft/server/level/ServerPlayer.java b/net/minecraft/server/level/ServerPlayer.java
+index f2fad43146db939b85d7e2ac1df4dbdb86e41ac8..97c383efe6b8d068bdfde457f2dd50dc1825f3fd 100644
+--- a/net/minecraft/server/level/ServerPlayer.java
++++ b/net/minecraft/server/level/ServerPlayer.java
+@@ -1725,6 +1725,12 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+     public static final long TELEPORT_FLAGS_PLAYER_RESPAWN    = Long.MIN_VALUE >>> 0;
+ 
+     public void exitEndCredits() {
++        // Tessera start - end credits
++        this.exitEndCredits(false);
++    }
++
++    public void exitEndCredits(final boolean showCredits) {
++        // Tessera end - end credits
+         if (!this.wonGame) {
+             // not in the end credits anymore
+             return;
+@@ -1733,9 +1739,31 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+ 
+         this.respawn((player) -> {
+             CriteriaTriggers.CHANGED_DIMENSION.trigger(player, Level.END, Level.OVERWORLD);
++            // Tessera start - end credits
++            if (showCredits) {
++                showEndCreditsWhenLoaded(player, 0);
++            }
++            // Tessera end - end credits
+         }, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason.END_PORTAL, true);
+     }
+ 
++    // Tessera start - end credits
++    // The player is already in the overworld, the credits are shown on top of it. They are sent once the client has
++    // loaded the new level, so the loading screen does not replace them. When the credits are closed the client sends
++    // PERFORM_RESPAWN, which does nothing for a living player that is not in the credits.
++    private static final int END_CREDITS_MAX_WAIT_TICKS = 200;
++
++    private static void showEndCreditsWhenLoaded(final ServerPlayer player, final int waited) {
++        player.getBukkitEntity().taskScheduler.schedule((ServerPlayer updatedPlayer) -> {
++            if (updatedPlayer.connection.hasClientLoaded() || waited >= END_CREDITS_MAX_WAIT_TICKS) {
++                updatedPlayer.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
++            } else {
++                showEndCreditsWhenLoaded(updatedPlayer, waited + 1);
++            }
++        }, null, 1L);
++    }
++    // Tessera end - end credits
++
+     public void respawn(java.util.function.Consumer<ServerPlayer> respawnComplete, org.bukkit.event.player.PlayerRespawnEvent.RespawnReason reason) {
+         this.respawn(respawnComplete, reason, false);
+     }
+@@ -2065,12 +2093,13 @@ public class ServerPlayer extends Player implements ca.spottedleaf.moonrise.patc
+                 return false;
+             }
+             this.wonGame = true;
++            final boolean showCredits = !this.seenCredits && !this.level().paperConfig().misc.disableEndCredits; // Tessera - end credits
+             // TODO is there a better solution to this that DOESN'T skip the credits?
+             this.seenCredits = true;
+             if (!this.seenCredits) {
+                 this.connection.send(new ClientboundGameEventPacket(ClientboundGameEventPacket.WIN_GAME, 0.0F));
+             }
+-            this.exitEndCredits();
++            this.exitEndCredits(showCredits); // Tessera - end credits
+             return true;
+         } else {
+             return super.endPortalLogicAsync(portalPos);

@@ -52,11 +52,10 @@ Rest of the item about minor races (the rest is in "Done").
 - **Not reproducible on 26.3.** "Hero of the Village" after a raid: Folia already applies the effect on the hero's thread ("Fix off
   region raid heroes"). Moonrise#130: the index in `ParallelSearchRadiusIteration` does not go past the table — load
   distance is capped at `MAX_VIEW_DISTANCE + 1` in the setters, the table is sized for `MAX_VIEW_DISTANCE + 3`.
-- **What.** Folia currently does not show credits at all (`seenCredits = true`, TODO in `endPortalLogicAsync`): the player is
-  moved straight to the overworld. Bring credits back: first respawn in the overworld (`respawn(..., alive = true)`), then
-  `WIN_GAME`, a repeated `PERFORM_RESPAWN` after the credits does nothing.
-- **Done when.** Checked with a real client: credits are shown once, after them the player is in the overworld, not in
-  the End void.
+- **Server side done (0086).** The player respawns in the overworld first, then gets `WIN_GAME` once the client has loaded the level
+  (at most 200 ticks); shown once, not with `disable-end-credits`; `PERFORM_RESPAWN` after the credits does nothing for a living player.
+- **Left.** Check with a real client: the credits are shown once and are not closed by the level loading screen, after them the
+  player is in the overworld.
 
 ---
 
@@ -295,3 +294,4 @@ Folia regions are already isolated, the next step is spreading them across proce
 | Global setters in `onEnable` at startup: old build `setGameRule`, `setPVP`, `setTime`, `setStorm` throw "off of the global region" (3 plugins disabled on a real plugin set), new build they apply and keep their values; an async call is still refused | — | 0084 |
 | `teleportAsync` from `onDisable` at shutdown: old build NPE in `getNearbyPlayers` for a 24-block teleport, new build teleports; a 5000-block teleport neither fails nor completes, shutdown not delayed | — | paper 0045 |
 | `/version`: old build "Unknown version" (compared with PaperMC/Folia), no startup check on Folia; new build with build number 15: "You are 2 version(s) behind" with the Tessera releases link, and "Currently you are 2 builds behind" after Done, T-062 | — | 0085 / paper 0046 |
+| End credits (server side): old build never sends `WIN_GAME`, new build respawns the player in the overworld and then sends `WIN_GAME` once (bot: respawn packet, `WIN_GAME` 3 s later, none on a second portal); real client not checked, T-035 | — | 0086 |
