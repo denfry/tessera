@@ -294,3 +294,4 @@ Folia regions are already isolated, the next step is spreading them across proce
 | `Entity#remove` from `onDisable`: old build NPE, new build removes the entity. `World#spawn` from a compatibility-mode task and `getCurrentTick` work | — | paper 0037, 0069, 0070 |
 | Server TPS off a region: old build `getTPS` throws on an async thread, reports the global tick on the global thread, `getTickTimes` is empty; new build reports the worst region, T-107 | — | 0082 / paper 0044 |
 | Command tree changed while it is copied (`skript reload`): test plugin re-registering subcommands every tick, 2 bots, 2 region threads; old build 2 `ConcurrentModificationException` in 40 s, new build none, T-103 | — | 0083 |
+| Global setters in `onEnable` at startup: old build `setGameRule`, `setPVP`, `setTime`, `setStorm` throw "off of the global region" (3 plugins disabled on a real plugin set), new build they apply and keep their values; an async call is still refused | — | 0084 |

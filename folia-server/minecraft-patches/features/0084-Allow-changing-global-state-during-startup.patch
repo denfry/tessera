@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Tue, 3 Nov 2026 10:39:59 +0300
+Subject: [PATCH] Allow changing global state during startup
+
+Plugins set game rules, PvP, time and weather in onEnable. At startup
+that runs on the server thread before the global region ticks, and the
+global region checks rejected it, disabling the plugin. Nothing ticks in
+parallel before RegionizedServer#init, so accept the server thread until
+then.
+
+diff --git a/io/papermc/paper/threadedregions/RegionizedServer.java b/io/papermc/paper/threadedregions/RegionizedServer.java
+index 036ec932f3624d25b7821cba79127161f3a8aa0a..469543e058a2908c667663a1b9f405a091d99f50 100644
+--- a/io/papermc/paper/threadedregions/RegionizedServer.java
++++ b/io/papermc/paper/threadedregions/RegionizedServer.java
+@@ -156,11 +156,23 @@ public final class RegionizedServer {
+     }
+ 
+     public static void ensureGlobalTickThread(final String reason) {
+-        if (!isGlobalTickThread()) {
++        if (!isGlobalTickThread() && !isStartupThread()) { // Tessera - global state can be changed during startup
+             throw new IllegalStateException(reason);
+         }
+     }
+ 
++    // Tessera start - global state can be changed during startup
++    // Plugins set game rules, PvP, time and weather in onEnable. At startup that runs on the server thread before the
++    // global region and the regions tick, so nothing can race with it; the global tick takes over once init() runs.
++    public static boolean isStartupThread() {
++        if (INSTANCE.started) {
++            return false;
++        }
++        final net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
++        return server != null && Thread.currentThread() == server.getRunningThread();
++    }
++    // Tessera end - global state can be changed during startup
++
+     public static TickRegionScheduler.RegionScheduleHandle getGlobalTickData() {
+         return INSTANCE.tickHandle;
+     }
