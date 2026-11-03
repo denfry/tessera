@@ -36,6 +36,8 @@ Tessera reads the usual Paper files (`config/paper-global.yml`, `config/paper-wo
 | `console.banner.logo` | Tessera logo | restart | Lines of the logo |
 | `console.banner.lines` | build, Java, CPU, memory | restart | Lines under the logo |
 | `branding.server-brand` | `''` | yes, for new joins | Name in the F3 screen and, with the version, in the server list for an incompatible client. `&` colors work, e.g. `'&6My&fServer'`. Empty keeps `Tessera`. A proxy may replace it |
+| `monitoring.spike-threshold-ms` | `0` | yes | A region tick or task longer than this is sampled every 5 ms; the top frames and stacks go to `logs/spikes/` with the region's location. `0` is off, `200` is a good start |
+| `monitoring.spike-max-reports` | `50` | yes | Reports kept in `logs/spikes/`; a region writes at most one every 10 s |
 
 ## Branding the console
 

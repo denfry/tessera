@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Tue, 3 Nov 2026 11:46:08 +0300
+Subject: [PATCH] Expose the running region ticks of the watchdog
+
+For the spike detector, which samples region threads whose tick runs
+longer than a threshold.
+
+diff --git a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+index 6c594cbde02f8ae0e330f41bccd733e83b44bfcf..7ad1c2af26f75b5a521785d63e6e1c6c0aff9329 100644
+--- a/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
++++ b/io/papermc/paper/threadedregions/FoliaWatchdogThread.java
+@@ -171,4 +171,12 @@ public final class FoliaWatchdogThread extends Thread {
+             this.ticks.remove(tick);
+         }
+     }
++
++    // Tessera start - spike detector
++    public List<RunningTick> getRunningTicks() {
++        synchronized (this.ticks) {
++            return this.ticks.isEmpty() ? List.of() : new ArrayList<>(this.ticks);
++        }
++    }
++    // Tessera end - spike detector
+ }

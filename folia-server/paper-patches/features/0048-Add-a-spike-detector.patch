@@ -1,0 +1,258 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Tue, 3 Nov 2026 11:46:08 +0300
+Subject: [PATCH] Add a spike detector
+
+The bundled spark has no tick hooks on Folia, so it cannot profile only
+slow ticks, and short lag spikes leave no trace. With
+monitoring.spike-threshold-ms set, a region tick or task run that takes
+longer is sampled every 5 ms until it ends, and the most common frames
+and stacks are written to logs/spikes/ with the region's location and
+size. At most one report per region every 10 seconds, the newest
+monitoring.spike-max-reports files are kept. Off by default.
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+index cdaa84b7af35b68ed8f602b3c9675994b8f640fe..78afa1acb3027793200d19a41b07659f9095da4b 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraCompat.java
+@@ -92,8 +92,18 @@ public final class TesseraCompat {
+         .text("branding.server-brand", "", false, """
+             The server name players see in the F3 screen and, next to the version, in the server list when
+             their client is too old or too new. Empty keeps the build's own name. & color codes work, for
+-            example '&6My&fServer'. Applies to players who join after a reload; a proxy may replace it.""");
++            example '&6My&fServer'. Applies to players who join after a reload; a proxy may replace it.""")
+         // Tessera end - server brand option
++        // Tessera start - spike detector
++        .group("monitoring", "")
++        .integer("monitoring.spike-threshold-ms", 0, 0, 60000, false, """
++            A region tick or task run longer than this many milliseconds is sampled every few milliseconds until
++            it ends, and the most common stacks are written to logs/spikes/ with the region's location, so short
++            lag spikes can be traced to a plugin, entity or block. 0 turns it off; 200 is a good start.""")
++        .integer("monitoring.spike-max-reports", 50, 1, 10000, false, """
++            How many spike reports logs/spikes/ keeps; older ones are deleted. A region writes at most one report
++            every 10 seconds.""");
++        // Tessera end - spike detector
+ 
+     private static volatile Path configFile;
+     private static volatile Map<String, Object> values = CONFIG.defaults();
+@@ -172,6 +182,7 @@ public final class TesseraCompat {
+         distantMobAiMaxInterval = (Integer) config.get("performance.distant-mob-ai-max-interval");
+         distantMobAi = (Boolean) config.get("performance.distant-mob-ai");
+         asyncEntityTracker = (Boolean) config.get("performance.async-entity-tracker");
++        TesseraSpikeDetector.configure((Integer) config.get("monitoring.spike-threshold-ms"), (Integer) config.get("monitoring.spike-max-reports")); // Tessera - spike detector
+     }
+ 
+     /**
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraSpikeDetector.java b/src/main/java/io/papermc/paper/threadedregions/TesseraSpikeDetector.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..127ea50acdfa4d329b097745674f687183a393a3
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraSpikeDetector.java
+@@ -0,0 +1,207 @@
++package io.papermc.paper.threadedregions;
++
++import com.mojang.logging.LogUtils;
++import java.io.IOException;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.time.Instant;
++import java.time.ZoneId;
++import java.time.format.DateTimeFormatter;
++import java.util.ArrayList;
++import java.util.Comparator;
++import java.util.HashMap;
++import java.util.IdentityHashMap;
++import java.util.List;
++import java.util.Map;
++import java.util.concurrent.TimeUnit;
++import java.util.stream.Stream;
++import net.minecraft.world.level.ChunkPos;
++import org.slf4j.Logger;
++
++// Tessera - spike detector
++// Samples the stack of a region thread whose tick or task run takes longer than monitoring.spike-threshold-ms and
++// writes the most common stacks to logs/spikes/ when it ends. The watchdog already tracks every running tick; this
++// thread only reads that list, so it costs nothing while ticks are short and nothing at all when turned off.
++public final class TesseraSpikeDetector extends Thread {
++
++    private static final Logger LOGGER = LogUtils.getClassLogger();
++    private static final DateTimeFormatter FILE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS").withZone(ZoneId.systemDefault());
++    private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS").withZone(ZoneId.systemDefault());
++    private static final Path DIRECTORY = Path.of("logs", "spikes");
++    private static final long SAMPLE_INTERVAL_MS = 5L;
++    private static final long MAX_SAMPLING_NANOS = TimeUnit.SECONDS.toNanos(10L); // longer stalls are the watchdog's
++    private static final long REPORT_COOLDOWN_NANOS = TimeUnit.SECONDS.toNanos(10L);
++    private static final int STACK_DEPTH = 30;
++    private static final int TOP_STACKS = 10;
++    private static final int TOP_FRAMES = 15;
++
++    private static volatile long thresholdNanos;
++    private static volatile int maxReports = 50;
++    private static TesseraSpikeDetector thread;
++
++    private final Map<FoliaWatchdogThread.RunningTick, Spike> spikes = new IdentityHashMap<>();
++    private final Map<Object, Long> lastReport = new HashMap<>();
++
++    private static final class Spike {
++        final long start;
++        final Map<String, Integer> stacks = new HashMap<>();
++        final Map<String, Integer> topFrames = new HashMap<>();
++        int samples;
++
++        Spike(final long start) {
++            this.start = start;
++        }
++    }
++
++    private TesseraSpikeDetector() {
++        super("Tessera Spike Detector");
++        this.setDaemon(true);
++        this.setPriority(Thread.MAX_PRIORITY);
++    }
++
++    public static synchronized void configure(final int thresholdMs, final int keepReports) {
++        thresholdNanos = TimeUnit.MILLISECONDS.toNanos(thresholdMs);
++        maxReports = keepReports;
++        if (thresholdMs > 0 && thread == null) {
++            thread = new TesseraSpikeDetector();
++            thread.start();
++        }
++    }
++
++    @Override
++    public void run() {
++        for (;;) {
++            try {
++                Thread.sleep(thresholdNanos == 0L ? 1000L : SAMPLE_INTERVAL_MS);
++            } catch (final InterruptedException ex) {
++                return;
++            }
++            try {
++                this.sample();
++            } catch (final Throwable throwable) {
++                LOGGER.warn("Spike detector failed", throwable);
++            }
++        }
++    }
++
++    private void sample() {
++        final long threshold = thresholdNanos;
++        final List<FoliaWatchdogThread.RunningTick> running = threshold == 0L ? List.of() : TickRegionScheduler.WATCHDOG_THREAD.getRunningTicks();
++        final long now = System.nanoTime();
++
++        // ticks that ended since the last sample
++        if (!this.spikes.isEmpty()) {
++            final List<FoliaWatchdogThread.RunningTick> ended = new ArrayList<>();
++            for (final FoliaWatchdogThread.RunningTick tick : this.spikes.keySet()) {
++                if (!running.contains(tick)) {
++                    ended.add(tick);
++                }
++            }
++            for (final FoliaWatchdogThread.RunningTick tick : ended) {
++                this.report(tick, this.spikes.remove(tick), now);
++            }
++        }
++
++        for (final FoliaWatchdogThread.RunningTick tick : running) {
++            final long elapsed = now - tick.start;
++            if (elapsed < threshold || elapsed > MAX_SAMPLING_NANOS) {
++                continue;
++            }
++            final Spike spike = this.spikes.computeIfAbsent(tick, key -> new Spike(key.start));
++            final StackTraceElement[] stack = tick.thread.getStackTrace();
++            if (stack.length == 0) {
++                continue;
++            }
++            ++spike.samples;
++            final StringBuilder collapsed = new StringBuilder();
++            for (int i = 0; i < Math.min(STACK_DEPTH, stack.length); ++i) {
++                collapsed.append("\tat ").append(stack[i]).append('\n');
++            }
++            if (stack.length > STACK_DEPTH) {
++                collapsed.append("\t... ").append(stack.length - STACK_DEPTH).append(" more\n");
++            }
++            spike.stacks.merge(collapsed.toString(), 1, Integer::sum);
++            spike.topFrames.merge(stack[0].toString(), 1, Integer::sum);
++        }
++    }
++
++    private void report(final FoliaWatchdogThread.RunningTick tick, final Spike spike, final long now) {
++        if (spike.samples == 0) {
++            return;
++        }
++        final Object key = tick.handle instanceof TickRegions.ConcreteRegionTickHandle region ? region.region : tick.handle;
++        final Long last = this.lastReport.get(key);
++        if (last != null && now - last < REPORT_COOLDOWN_NANOS) {
++            return;
++        }
++        this.lastReport.put(key, now);
++        this.lastReport.values().removeIf(time -> now - time > REPORT_COOLDOWN_NANOS * 6L);
++
++        final double durationMs = (now - spike.start) / 1.0E6;
++        String where = "the global region";
++        String fileWhere = "global";
++        String stats = "";
++        if (tick.handle instanceof TickRegions.ConcreteRegionTickHandle region) {
++            final ChunkPos center = region.region.region.getCenterChunk();
++            final String world = region.region.world.getWorld().getName();
++            final TickRegions.RegionStats regionStats = region.region.getRegionStats();
++            if (center != null) {
++                final int blockX = (center.x() << 4) | 7;
++                final int blockZ = (center.z() << 4) | 7;
++                where = "the region in world '" + world + "' around block " + blockX + ", " + blockZ;
++                fileWhere = world.replaceAll("[^A-Za-z0-9_.-]", "_") + "_" + blockX + "_" + blockZ;
++            } else {
++                where = "a region in world '" + world + "'";
++                fileWhere = world.replaceAll("[^A-Za-z0-9_.-]", "_");
++            }
++            stats = "Chunks: " + regionStats.getChunkCount() + ", entities: " + regionStats.getEntityCount() + ", players: " + regionStats.getPlayerCount() + "\n";
++        }
++
++        final Instant time = Instant.now();
++        final Path file = DIRECTORY.resolve(FILE_TIME.format(time) + "_" + fileWhere + ".txt");
++        final StringBuilder out = new StringBuilder();
++        out.append("Tessera spike report\n")
++            .append("Time: ").append(TIME.format(time)).append('\n')
++            .append("Where: ").append(where).append('\n')
++            .append("Thread: ").append(tick.thread.getName()).append('\n')
++            .append(String.format(java.util.Locale.ROOT, "Duration: %.1f ms (threshold %d ms)%s%n", durationMs,
++                TimeUnit.NANOSECONDS.toMillis(thresholdNanos), now - spike.start > MAX_SAMPLING_NANOS ? ", sampled for the first 10 s only" : ""))
++            .append(stats)
++            .append("Samples: ").append(spike.samples).append(", one every ").append(SAMPLE_INTERVAL_MS).append(" ms after the threshold\n\n");
++
++        out.append("Top frames (where the thread was):\n");
++        for (final Map.Entry<String, Integer> entry : top(spike.topFrames, TOP_FRAMES)) {
++            out.append(String.format(java.util.Locale.ROOT, "%5.1f%%  %s%n", 100.0 * entry.getValue() / spike.samples, entry.getKey()));
++        }
++        out.append("\nTop stacks:\n");
++        for (final Map.Entry<String, Integer> entry : top(spike.stacks, TOP_STACKS)) {
++            out.append(String.format(java.util.Locale.ROOT, "%n%5.1f%% (%d samples)%n", 100.0 * entry.getValue() / spike.samples, entry.getValue()))
++                .append(entry.getKey());
++        }
++
++        try {
++            Files.createDirectories(DIRECTORY);
++            Files.writeString(file, out);
++            prune();
++            LOGGER.warn("Tick of {} took {} ms; spike report written to {}", where, String.format(java.util.Locale.ROOT, "%.0f", durationMs), file);
++        } catch (final IOException ex) {
++            LOGGER.warn("Could not write spike report " + file, ex);
++        }
++    }
++
++    private static List<Map.Entry<String, Integer>> top(final Map<String, Integer> counts, final int limit) {
++        final List<Map.Entry<String, Integer>> ret = new ArrayList<>(counts.entrySet());
++        ret.sort(Map.Entry.<String, Integer>comparingByValue().reversed());
++        return ret.size() > limit ? ret.subList(0, limit) : ret;
++    }
++
++    private static void prune() throws IOException {
++        final List<Path> files;
++        try (final Stream<Path> stream = Files.list(DIRECTORY)) {
++            files = stream.filter(path -> path.getFileName().toString().endsWith(".txt")).sorted(Comparator.comparing(Path::getFileName)).toList();
++        }
++        for (int i = 0; i < files.size() - maxReports; ++i) {
++            Files.deleteIfExists(files.get(i));
++        }
++    }
++}

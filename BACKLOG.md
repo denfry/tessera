@@ -165,7 +165,7 @@ Builds on T-003 (per-region report and MBean).
 - **T-112 Time per entity and block entity type in a region.** Summary from the existing Folia profiler without taking a full profile.
 - **T-113 `/tessera lag`.** Done for regions, entity and block entity types (paper 0047). Plugins per region need T-111.
 - **T-114 Export.** T-111 and T-112 numbers in the T-003 MBean (Prometheus via jmx_exporter).
-- **T-115 Spike detector.** If a region tick exceeds a threshold, a short region profile is written to a file automatically.
+- **T-115 Spike detector.** Done (0087, paper 0048): stacks of slow ticks in `logs/spikes/`. A full region profile (spark) on a spike is still open.
 
 ### C. Horizontal scaling (T-120) — research
 
@@ -296,3 +296,4 @@ Folia regions are already isolated, the next step is spreading them across proce
 | `/version`: old build "Unknown version" (compared with PaperMC/Folia), no startup check on Folia; new build with build number 15: "You are 2 version(s) behind" with the Tessera releases link, and "Currently you are 2 builds behind" after Done, T-062 | — | 0085 / paper 0046 |
 | End credits (server side): old build never sends `WIN_GAME`, new build respawns the player in the overworld and then sends `WIN_GAME` once (bot: respawn packet, `WIN_GAME` 3 s later, none on a second portal); real client not checked, T-035 | — | 0086 |
 | `/tessera lag`: 2 bots in 2 regions, 75 hoppers next to one; report lists both regions by MSPT with entity and block entity types (75 hopper) and the busiest chunk. Over RCON the answer comes after the command returns (collected on the region threads), T-113 | — | paper 0047 |
+| Spike detector, threshold 200 ms: a plugin task busy for 350 ms in a region and 250 ms on the global region gives two reports with `heavyPluginWork` as the top frame; a second region spike 2 s later is skipped (cooldown); no errors, T-115 | — | 0087 / paper 0048 |
