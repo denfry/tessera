@@ -1,0 +1,281 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Tue, 3 Nov 2026 11:36:43 +0300
+Subject: [PATCH] Add /tessera lag
+
+/tps lists the regions with the highest tick times, but not what makes
+them slow. /tessera lag [regions] lists the busiest regions over the
+last 15 seconds with their entities and ticking block entities by type
+and the chunk with the most entities, collected on each region's own
+thread. Locations are clickable to teleport. Permission
+tessera.command.lag.
+
+diff --git a/src/main/java/io/papermc/paper/command/TesseraCommand.java b/src/main/java/io/papermc/paper/command/TesseraCommand.java
+index 16f556bc809544826a77f2771d86d4f64267e85d..430abef4b104575c4013a8151834429efb84958e 100644
+--- a/src/main/java/io/papermc/paper/command/TesseraCommand.java
++++ b/src/main/java/io/papermc/paper/command/TesseraCommand.java
+@@ -31,9 +31,9 @@ public final class TesseraCommand extends Command {
+ 
+     public TesseraCommand() {
+         super("tessera");
+-        this.setUsage("/<command> compat [plugin|dump|reset] | reload"); // Tessera - self-updating tessera.yml
+-        this.setDescription("Tessera tools: the compatibility mode report, reloading tessera.yml."); // Tessera - self-updating tessera.yml
+-        this.setPermission("tessera.command.compat;tessera.command.reload"); // Tessera - self-updating tessera.yml
++        this.setUsage("/<command> compat [plugin|dump|reset] | reload | lag [regions]"); // Tessera - self-updating tessera.yml // Tessera - /tessera lag
++        this.setDescription("Tessera tools: the compatibility mode report, reloading tessera.yml, what the busiest regions are made of."); // Tessera - self-updating tessera.yml // Tessera - /tessera lag
++        this.setPermission("tessera.command.compat;tessera.command.reload;tessera.command.lag"); // Tessera - self-updating tessera.yml // Tessera - /tessera lag
+     }
+ 
+     @Override
+@@ -46,8 +46,23 @@ public final class TesseraCommand extends Command {
+             this.reload(sender);
+             return true;
+         }
++        // Tessera start - /tessera lag
++        if (args.length >= 1 && args[0].equalsIgnoreCase("lag") && sender.hasPermission("tessera.command.lag")) {
++            int count = TesseraLagReport.DEFAULT_REGIONS;
++            if (args.length >= 2) {
++                try {
++                    count = Math.max(1, Math.min(TesseraLagReport.MAX_REGIONS, Integer.parseInt(args[1])));
++                } catch (final NumberFormatException ex) {
++                    sender.sendMessage(Component.text("Number of regions must be an integer", NamedTextColor.RED));
++                    return true;
++                }
++            }
++            TesseraLagReport.run(sender, count);
++            return true;
++        }
++        // Tessera end - /tessera lag
+         if (args.length < 1 || !args[0].equalsIgnoreCase("compat") || !sender.hasPermission("tessera.command.compat")) {
+-            sender.sendMessage(Component.text("Usage: /" + commandLabel + " compat [plugin|dump|reset] | reload", NamedTextColor.RED));
++            sender.sendMessage(Component.text("Usage: /" + commandLabel + " compat [plugin|dump|reset] | reload | lag [regions]", NamedTextColor.RED)); // Tessera - /tessera lag
+             return true;
+         }
+         // Tessera end - self-updating tessera.yml
+@@ -169,7 +184,7 @@ public final class TesseraCommand extends Command {
+     @Override
+     public List<String> tabComplete(final CommandSender sender, final String alias, final String[] args) {
+         if (args.length == 1) {
+-            return io.papermc.paper.threadedregions.commands.CommandUtil.getSortedList(List.of("compat", "reload"), args[0]); // Tessera - self-updating tessera.yml
++            return io.papermc.paper.threadedregions.commands.CommandUtil.getSortedList(List.of("compat", "lag", "reload"), args[0]); // Tessera - /tessera lag // Tessera - self-updating tessera.yml
+         }
+         if (args.length == 2 && args[0].equalsIgnoreCase("compat")) {
+             final List<String> options = new ArrayList<>(List.of("dump", "reset"));
+diff --git a/src/main/java/io/papermc/paper/command/TesseraLagReport.java b/src/main/java/io/papermc/paper/command/TesseraLagReport.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..10de1dcade8c5629a3881cb6eadc5a9a304bae84
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/command/TesseraLagReport.java
+@@ -0,0 +1,212 @@
++package io.papermc.paper.command;
++
++import ca.spottedleaf.common.time.TickData;
++import io.papermc.paper.threadedregions.RegionizedServer;
++import io.papermc.paper.threadedregions.RegionizedWorldData;
++import io.papermc.paper.threadedregions.ThreadedRegionizer;
++import io.papermc.paper.threadedregions.TickRegionScheduler;
++import io.papermc.paper.threadedregions.TickRegions;
++import io.papermc.paper.threadedregions.commands.CommandUtil;
++import it.unimi.dsi.fastutil.longs.Long2IntOpenHashMap;
++import it.unimi.dsi.fastutil.objects.Object2IntMap;
++import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
++import java.util.ArrayList;
++import java.util.Comparator;
++import java.util.List;
++import java.util.Locale;
++import java.util.concurrent.CompletableFuture;
++import java.util.concurrent.TimeUnit;
++import net.kyori.adventure.text.Component;
++import net.kyori.adventure.text.TextComponent;
++import net.kyori.adventure.text.event.ClickEvent;
++import net.kyori.adventure.text.event.HoverEvent;
++import net.kyori.adventure.text.format.NamedTextColor;
++import net.minecraft.server.MinecraftServer;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.world.entity.Entity;
++import net.minecraft.world.entity.EntityType;
++import net.minecraft.world.level.ChunkPos;
++import net.minecraft.world.level.block.entity.TickingBlockEntity;
++import org.bukkit.command.CommandSender;
++import org.checkerframework.checker.nullness.qual.NonNull;
++import org.checkerframework.checker.nullness.qual.Nullable;
++import org.checkerframework.framework.qual.DefaultQualifier;
++
++// Tessera - /tessera lag: what the busiest regions are made of
++@DefaultQualifier(NonNull.class)
++final class TesseraLagReport {
++
++    static final int DEFAULT_REGIONS = 3;
++    static final int MAX_REGIONS = 10;
++    private static final int TOP_TYPES = 5;
++    private static final long TIMEOUT_SECONDS = 10L;
++
++    private TesseraLagReport() {}
++
++    private record RegionTiming(ServerLevel world, ChunkPos center, double mspt, double utilisation, double tps) {}
++
++    private record RegionContents(int entities, int tickingEntities, List<Object2IntMap.Entry<String>> entityTypes,
++                                  int blockEntityTickers, List<Object2IntMap.Entry<String>> blockEntityTypes,
++                                  int tickingChunks, long busiestChunk, int busiestChunkEntities) {}
++
++    static void run(final CommandSender sender, final int count) {
++        final List<RegionTiming> timings = busiest(count);
++        if (timings.isEmpty()) {
++            sender.sendMessage(Component.text("No ticking regions.", NamedTextColor.YELLOW));
++            return;
++        }
++        sender.sendMessage(Component.text("Collecting the contents of " + timings.size() + " busiest region(s)...", NamedTextColor.GRAY));
++
++        final List<CompletableFuture<@Nullable RegionContents>> futures = new ArrayList<>(timings.size());
++        for (final RegionTiming timing : timings) {
++            futures.add(collect(timing).completeOnTimeout(null, TIMEOUT_SECONDS, TimeUnit.SECONDS));
++        }
++        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).whenComplete((ignored, throwable) -> {
++            final TextComponent.Builder message = Component.text()
++                .append(Component.text("Busiest regions over the last 15 seconds", NamedTextColor.GOLD));
++            for (int i = 0; i < timings.size(); ++i) {
++                message.append(Component.newline()).append(format(i + 1, timings.get(i), futures.get(i).getNow(null)));
++            }
++            sender.sendMessage(message.build());
++        });
++    }
++
++    private static List<RegionTiming> busiest(final int count) {
++        final List<RegionTiming> ret = new ArrayList<>();
++        final long currTime = System.nanoTime();
++        for (final ServerLevel world : MinecraftServer.getServer().getAllLevels()) {
++            final List<ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData>> regions = new ArrayList<>();
++            world.regioniser.computeForAllRegions(regions::add);
++            for (final ThreadedRegionizer.ThreadedRegion<TickRegions.TickRegionData, TickRegions.TickRegionSectionData> region : regions) {
++                final ChunkPos center = region.getCenterChunk();
++                final TickData.TickReportData report = region.getData().getRegionSchedulingHandle().getTickReport15s(currTime);
++                if (center == null || report == null) {
++                    continue;
++                }
++                ret.add(new RegionTiming(world, center, report.timePerTickData().segmentAll().average() / 1.0E6,
++                    report.utilisation(), report.tpsData().segmentAll().average()));
++            }
++        }
++        ret.sort(Comparator.comparingDouble(RegionTiming::mspt).reversed());
++        return ret.size() > count ? new ArrayList<>(ret.subList(0, count)) : ret;
++    }
++
++    // runs on the thread that owns the region's center chunk, which is the only one allowed to read its entities
++    private static CompletableFuture<@Nullable RegionContents> collect(final RegionTiming timing) {
++        final CompletableFuture<@Nullable RegionContents> ret = new CompletableFuture<>();
++        final Object queued = RegionizedServer.getInstance().taskQueue.queueTickTaskQueue(timing.world(), timing.center().x(), timing.center().z(), () -> {
++            try {
++                ret.complete(collectHere());
++            } catch (final Throwable throwable) {
++                ret.complete(null);
++            }
++        });
++        if (queued == null) {
++            ret.complete(null);
++        }
++        return ret;
++    }
++
++    private static RegionContents collectHere() {
++        final RegionizedWorldData worldData = TickRegionScheduler.getCurrentRegionizedWorldData();
++        final Object2IntOpenHashMap<String> entityTypes = new Object2IntOpenHashMap<>();
++        final Long2IntOpenHashMap perChunk = new Long2IntOpenHashMap();
++        int entities = 0;
++        for (final Entity entity : worldData.getLocalEntitiesCopy()) {
++            ++entities;
++            entityTypes.addTo(shortKey(EntityType.getKey(entity.getType()).toString()), 1);
++            perChunk.addTo(ChunkPos.pack(entity.chunkPosition().x(), entity.chunkPosition().z()), 1);
++        }
++        final int[] ticking = new int[1];
++        worldData.forEachTickingEntity(entity -> ++ticking[0]);
++
++        final Object2IntOpenHashMap<String> blockEntityTypes = new Object2IntOpenHashMap<>();
++        int blockEntityTickers = 0;
++        for (final TickingBlockEntity ticker : worldData.getBlockEntityTickers()) {
++            if (ticker.isRemoved()) {
++                continue;
++            }
++            ++blockEntityTickers;
++            blockEntityTypes.addTo(shortKey(ticker.getType()), 1);
++        }
++
++        long busiestChunk = 0L;
++        int busiestChunkEntities = 0;
++        for (final Long2IntOpenHashMap.Entry entry : perChunk.long2IntEntrySet()) {
++            if (entry.getIntValue() > busiestChunkEntities) {
++                busiestChunk = entry.getLongKey();
++                busiestChunkEntities = entry.getIntValue();
++            }
++        }
++        return new RegionContents(entities, ticking[0], top(entityTypes), blockEntityTickers, top(blockEntityTypes),
++            worldData.getTickingChunks().size(), busiestChunk, busiestChunkEntities);
++    }
++
++    private static String shortKey(final String key) {
++        return key.startsWith("minecraft:") ? key.substring("minecraft:".length()) : key;
++    }
++
++    private static List<Object2IntMap.Entry<String>> top(final Object2IntOpenHashMap<String> counts) {
++        final List<Object2IntMap.Entry<String>> ret = new ArrayList<>(counts.object2IntEntrySet());
++        ret.sort(Comparator.comparingInt(Object2IntMap.Entry<String>::getIntValue).reversed());
++        return ret.size() > TOP_TYPES ? new ArrayList<>(ret.subList(0, TOP_TYPES)) : ret;
++    }
++
++    private static Component format(final int place, final RegionTiming timing, final @Nullable RegionContents contents) {
++        final String worldName = timing.world().getWorld().getName();
++        final int blockX = (timing.center().x() << 4) | 7;
++        final int blockZ = (timing.center().z() << 4) | 7;
++        final TextComponent.Builder ret = Component.text()
++            .append(Component.text("#" + place + " ", NamedTextColor.GOLD))
++            .append(teleport(timing.world(), blockX, blockZ, "'" + worldName + "' around " + blockX + ", " + blockZ))
++            .append(Component.text(": ", NamedTextColor.GRAY))
++            .append(Component.text(String.format(Locale.ROOT, "%.2f", timing.mspt()), CommandUtil.getColourForMSPT(timing.mspt())))
++            .append(Component.text(" MSPT, ", NamedTextColor.GRAY))
++            .append(Component.text(String.format(Locale.ROOT, "%.1f", timing.utilisation() * 100.0), CommandUtil.getUtilisationColourRegion(timing.utilisation())))
++            .append(Component.text("% util, ", NamedTextColor.GRAY))
++            .append(Component.text(String.format(Locale.ROOT, "%.2f", timing.tps()), CommandUtil.getColourForTPS(timing.tps())))
++            .append(Component.text(" TPS", NamedTextColor.GRAY));
++        if (contents == null) {
++            return ret.append(Component.newline()).append(Component.text("   contents not available (region changed or did not tick)", NamedTextColor.GRAY)).build();
++        }
++        ret.append(Component.newline())
++            .append(Component.text("   Entities " + contents.entities() + " (" + contents.tickingEntities() + " ticking): ", NamedTextColor.GRAY))
++            .append(Component.text(join(contents.entityTypes()), NamedTextColor.WHITE))
++            .append(Component.newline())
++            .append(Component.text("   Ticking block entities " + contents.blockEntityTickers() + ": ", NamedTextColor.GRAY))
++            .append(Component.text(join(contents.blockEntityTypes()), NamedTextColor.WHITE))
++            .append(Component.newline())
++            .append(Component.text("   Ticking chunks " + contents.tickingChunks(), NamedTextColor.GRAY));
++        if (contents.busiestChunkEntities() > 0) {
++            final int chunkX = ChunkPos.getX(contents.busiestChunk());
++            final int chunkZ = ChunkPos.getZ(contents.busiestChunk());
++            final int x = (chunkX << 4) | 7;
++            final int z = (chunkZ << 4) | 7;
++            ret.append(Component.text(", most entities in chunk ", NamedTextColor.GRAY))
++                .append(teleport(timing.world(), x, z, chunkX + ", " + chunkZ + " (block " + x + ", " + z + ")"))
++                .append(Component.text(": " + contents.busiestChunkEntities(), NamedTextColor.GRAY));
++        }
++        return ret.build();
++    }
++
++    private static Component teleport(final ServerLevel world, final int x, final int z, final String text) {
++        final String command = "/minecraft:execute as @s in " + world.getWorld().getKey() + " run tp " + x + ".5 80 " + z + ".5";
++        return Component.text(text, NamedTextColor.AQUA)
++            .clickEvent(ClickEvent.runCommand(command))
++            .hoverEvent(HoverEvent.showText(Component.text("Click to teleport", NamedTextColor.GRAY)));
++    }
++
++    private static String join(final List<Object2IntMap.Entry<String>> entries) {
++        if (entries.isEmpty()) {
++            return "none";
++        }
++        final StringBuilder ret = new StringBuilder();
++        for (final Object2IntMap.Entry<String> entry : entries) {
++            if (!ret.isEmpty()) {
++                ret.append(", ");
++            }
++            ret.append(entry.getIntValue()).append(' ').append(entry.getKey());
++        }
++        return ret.toString();
++    }
++}

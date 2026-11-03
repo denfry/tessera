@@ -35,7 +35,8 @@ large survival servers.
 - **Plugins without Folia support** — compatibility mode runs Bukkit plugins without `folia-supported`
   (see [Plugins](#plugins)); `/tessera compat` shows what they do that Folia does not allow.
 - **Monitoring** — region report API and JMX beans (`dev.tessera:type=Region`), bundled spark adapted to regions,
-  a watchdog that names the lock a hung region waits for and the thread holding it.
+  a watchdog that names the lock a hung region waits for and the thread holding it, and `/tessera lag`: the busiest
+  regions with their entities and ticking block entities by type, click to teleport.
 - **Fixes** — respawn events, `teleportAsync` from `PlayerJoinEvent`, the locator bar, `/dialog`, ender pearls and stasis chambers, MiniHUD debug subscriptions, dragons away from 0,0,
   villagers in portals, region ownership in mob AI, autosave of maps and new players, network hardening.
 
