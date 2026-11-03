@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Tue, 3 Nov 2026 08:33:55 +0300
+Subject: [PATCH] Server tick statistics for callers that are not on a region
+
+Server#getTPS, getTickTimes and getAverageTickTime only knew the region
+the caller ticks. Add helpers over the global tick and all regions: the
+lowest TPS per window, the busiest region over the last 5 seconds and
+its raw tick times.
+
+diff --git a/io/papermc/paper/threadedregions/RegionReports.java b/io/papermc/paper/threadedregions/RegionReports.java
+index dcee29b38ab94d516fb7ff0104a6cee7e3da4a17..c96054299e5c8a5809b1ab5660c40f0d2e64b213 100644
+--- a/io/papermc/paper/threadedregions/RegionReports.java
++++ b/io/papermc/paper/threadedregions/RegionReports.java
+@@ -86,6 +86,62 @@ public final class RegionReports {
+         );
+     }
+ 
++    // Tessera start - server tick statistics for callers that are not on a region
++    // The global tick and every region. Off a region, Server#getTPS, getTickTimes and getAverageTickTime report the
++    // worst of them, which is what a plugin showing "the server TPS" wants to warn about.
++    private static List<TickRegionScheduler.RegionScheduleHandle> allHandles() {
++        final List<TickRegionScheduler.RegionScheduleHandle> ret = new ArrayList<>();
++        ret.add(RegionizedServer.getGlobalTickData());
++        final net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
++        if (server != null) {
++            for (final ServerLevel world : server.getAllLevels()) {
++                world.regioniser.computeForAllRegions(region -> ret.add(region.getData().getRegionSchedulingHandle()));
++            }
++        }
++        return ret;
++    }
++
++    // 1m, 5m, 15m like Server#getTPS, each the lowest over all regions
++    public static double[] lowestTps() {
++        final long currTime = System.nanoTime();
++        final double[] ret = {Double.MAX_VALUE, Double.MAX_VALUE, Double.MAX_VALUE};
++        for (final TickRegionScheduler.RegionScheduleHandle handle : allHandles()) {
++            ret[0] = Math.min(ret[0], tps(handle.getTickReport1m(currTime)));
++            ret[1] = Math.min(ret[1], tps(handle.getTickReport5m(currTime)));
++            ret[2] = Math.min(ret[2], tps(handle.getTickReport15m(currTime)));
++        }
++        return ret;
++    }
++
++    // the region with the highest average tick time over the last 5 seconds
++    public static TickRegionScheduler.RegionScheduleHandle busiest() {
++        final long currTime = System.nanoTime();
++        TickRegionScheduler.RegionScheduleHandle ret = null;
++        double retMspt = -1.0;
++        for (final TickRegionScheduler.RegionScheduleHandle handle : allHandles()) {
++            final double mspt = mspt(handle.getTickReport5s(currTime));
++            if (mspt > retMspt) {
++                ret = handle;
++                retMspt = mspt;
++            }
++        }
++        return ret;
++    }
++
++    public static double averageTickTime5s(final TickRegionScheduler.RegionScheduleHandle handle) {
++        return mspt(handle.getTickReport5s(System.nanoTime()));
++    }
++
++    // tick durations in nanoseconds over the last 5 seconds, like Server#getTickTimes on Paper
++    public static long[] tickTimes5s(final TickRegionScheduler.RegionScheduleHandle handle) {
++        final TickData.MSPTData data;
++        synchronized (handle) {
++            data = handle.tickTimes5s.getMSPTData(null, TickRegionScheduler.TIME_BETWEEN_TICKS);
++        }
++        return data == null ? new long[0] : data.rawData().clone();
++    }
++    // Tessera end - server tick statistics for callers that are not on a region
++
+     private record Snapshot(World world, long id, int centerChunkX, int centerChunkZ, int chunkCount, int entityCount,
+                             int playerCount, double[] tps, double[] mspt, double[] utilisation)
+         implements io.papermc.paper.threadedregions.RegionReport {

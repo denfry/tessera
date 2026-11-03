@@ -1,0 +1,71 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Tue, 3 Nov 2026 08:33:56 +0300
+Subject: [PATCH] Report server tick statistics off a region
+
+Off a region (the global tick, async threads) Server#getTPS and
+getAverageTickTime threw or reported the near-idle global tick, and
+getTickTimes always returned an empty array because Folia does not fill
+the server tick data. Plugins showing the server TPS and MSPT (TabTPS)
+printed 0 and Long.MAX_VALUE. Report the worst region there, and the
+tick times of the current region on a region thread.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/CraftServer.java b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+index 4f164e3ebbf9ba87fb91ca7ee327a025fa57169b..70f82bc568243f46a879e946bc47827f2a4119b7 100644
+--- a/src/main/java/org/bukkit/craftbukkit/CraftServer.java
++++ b/src/main/java/org/bukkit/craftbukkit/CraftServer.java
+@@ -2735,10 +2735,32 @@ public final class CraftServer implements Server {
+ 
+     @Override
+     public long[] getTickTimes() {
++        // Tessera start - tick times of the current region, or of the busiest one off a region
++        if (true) {
++            final io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle handle = currentRegionTickHandle();
++            return io.papermc.paper.threadedregions.RegionReports.tickTimes5s(handle == null ? io.papermc.paper.threadedregions.RegionReports.busiest() : handle);
++        }
++        // Tessera end - tick times of the current region, or of the busiest one off a region
+         final TickData.MSPTData reportData = this.getServer().getMSPTData5s();
+         return reportData == null ? new long[0] : reportData.rawData().clone();
+     }
+ 
++    // Tessera start - server tick statistics off a region
++    // The region the caller ticks, or null on the global tick and on other threads. There a plugin asks for the TPS of
++    // the server, so it gets the worst region instead of an exception (async thread) or the near-idle global tick.
++    private static io.papermc.paper.threadedregions.TickRegionScheduler.@org.jspecify.annotations.Nullable RegionScheduleHandle currentRegionTickHandle() {
++        ca.spottedleaf.concurrentutil.scheduler.SchedulableTick task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentTickingTask();
++        if (task == null && io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion() != null) {
++            task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion().getData().getRegionSchedulingHandle();
++        }
++        if (task instanceof io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle handle
++            && handle != io.papermc.paper.threadedregions.RegionizedServer.getGlobalTickData()) {
++            return handle;
++        }
++        return null;
++    }
++    // Tessera end - server tick statistics off a region
++
+     @Override
+     public double getAverageTickTime() {
+         // Folia start - region threading
+@@ -2750,8 +2772,8 @@ public final class CraftServer implements Server {
+                 task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion().getData().getRegionSchedulingHandle();
+             }
+         }
+-        if (!(task instanceof io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle tickHandle)) {
+-            throw new UnsupportedOperationException("Not on any region");
++        if (!(task instanceof io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle tickHandle) || tickHandle == io.papermc.paper.threadedregions.RegionizedServer.getGlobalTickData()) { // Tessera - server tick statistics off a region
++            return io.papermc.paper.threadedregions.RegionReports.averageTickTime5s(io.papermc.paper.threadedregions.RegionReports.busiest()); // Tessera - server tick statistics off a region
+         }
+ 
+ 
+@@ -2823,8 +2845,8 @@ public final class CraftServer implements Server {
+                 task = io.papermc.paper.threadedregions.TickRegionScheduler.getCurrentRegion().getData().getRegionSchedulingHandle();
+             }
+         }
+-        if (!(task instanceof io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle tickHandle)) {
+-            throw new UnsupportedOperationException("Not on any region");
++        if (!(task instanceof io.papermc.paper.threadedregions.TickRegionScheduler.RegionScheduleHandle tickHandle) || tickHandle == io.papermc.paper.threadedregions.RegionizedServer.getGlobalTickData()) { // Tessera - server tick statistics off a region
++            return io.papermc.paper.threadedregions.RegionReports.lowestTps(); // Tessera - server tick statistics off a region
+         }
+ 
+         // 1m, 5m, 15m

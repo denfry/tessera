@@ -141,9 +141,6 @@ by an option and only for listed plugins. Plugins written against the Folia API 
 - **Done when.** The main EssentialsX commands work (`/tp`, `/home`, `/heal`, `/give`, `/spawn`).
 - **T-103e.** Brigadier commands of a compatibility-mode plugin (Paper API or straight into the dispatcher, like Skript)
   run the same way as Bukkit commands in T-103b. Done.
-- **Remaining.** `skript reload all` re-registers commands while the Paper Async Command Builder pool walks the tree
-  (`Commands#fillUsableCommands` → `CommandNode#hashCode`): `ConcurrentModificationException`, the player gets the old
-  command tree. Synchronize registration from compatibility mode with tree building, or resend the tree afterwards.
 
 #### T-105 Cross-region operations
 - `openInventory` of a container in a foreign region, teleport with passengers, `getNearbyEntities` at a region border,
@@ -157,8 +154,10 @@ by an option and only for listed plugins. Plugins written against the Folia API 
 - `MinecraftServer.currentTick` restored (global region ticks). Done.
 - Delay 0 in Folia schedulers from a compatibility-mode plugin means the next tick, as in `BukkitScheduler`
   (InvSee++ switches to the Folia API itself and passes 0). Done.
-- Remaining: `MinecraftServer#execute` / `MCUtil.MAIN_EXECUTOR` (FAWE adds tickets through it), `Server#getTickTimes`
-  and `getAverageTickTime` off the region thread (TabTPS shows MSPT 0 and `Long.MAX_VALUE`).
+- `Server#getTPS`, `getTickTimes` and `getAverageTickTime` off a region report the worst region. Done.
+- Remaining: `MinecraftServer#execute` / `MCUtil.MAIN_EXECUTOR` (FAWE adds tickets through it). Not done on purpose: vanilla code
+  that reaches `execute` fails loudly today, a queue on the global thread would turn that into silent off-region writes, and FAWE
+  still writes chunks from its own threads. WorldEdit supports Folia.
 
 ### B. Lag attribution (T-110)
 
@@ -293,3 +292,5 @@ Folia regions are already isolated, the next step is spreading them across proce
 | `stop` read before the worlds load works. `echo stop \| java -jar`: old build NPE and the server keeps running, new build stops, T-065 | — | 0077 |
 | Retired callbacks on shutdown: no change needed. Plugins are disabled before players are removed and tasks of a disabled plugin are dropped, as on Paper (by reading the code), T-213 | #479 | — |
 | `Entity#remove` from `onDisable`: old build NPE, new build removes the entity. `World#spawn` from a compatibility-mode task and `getCurrentTick` work | — | paper 0037, 0069, 0070 |
+| Server TPS off a region: old build `getTPS` throws on an async thread, reports the global tick on the global thread, `getTickTimes` is empty; new build reports the worst region, T-107 | — | 0082 / paper 0044 |
+| Command tree changed while it is copied (`skript reload`): test plugin re-registering subcommands every tick, 2 bots, 2 region threads; old build 2 `ConcurrentModificationException` in 40 s, new build none, T-103 | — | 0083 |
