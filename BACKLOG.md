@@ -93,8 +93,6 @@ Rest of the item about minor races (the rest is in "Done").
   creates an `upstream-sync` branch, merges PaperMC/Folia, runs `applyAllPatches` and the build, and opens a PR.
 - **T-061** Chunk API messages ([#96](https://github.com/PaperMC/Folia/issues/96)): clear errors when synchronous API
   is called from the wrong thread (which thread, which region, what to use instead).
-- **T-062** Version check for Tessera: `/version` currently prints "Unknown version". Check against GitHub Releases of
-  `denfry/tessera`.
 - **T-063** CI: run `tools/joinbot.py` against the built jar in Actions (server, two bots, join and leave, shutdown without ERROR).
 - **T-066** Teleport event edge cases (after T-002): for a portal, `PlayerTeleportEvent` gets an approximate exit (the portal is not found yet);
   with `canCreatePortal=false` and no portal the entity is placed at the search point instead of staying in place as on Paper; the rollback
@@ -296,3 +294,4 @@ Folia regions are already isolated, the next step is spreading them across proce
 | Command tree changed while it is copied (`skript reload`): test plugin re-registering subcommands every tick, 2 bots, 2 region threads; old build 2 `ConcurrentModificationException` in 40 s, new build none, T-103 | — | 0083 |
 | Global setters in `onEnable` at startup: old build `setGameRule`, `setPVP`, `setTime`, `setStorm` throw "off of the global region" (3 plugins disabled on a real plugin set), new build they apply and keep their values; an async call is still refused | — | 0084 |
 | `teleportAsync` from `onDisable` at shutdown: old build NPE in `getNearbyPlayers` for a 24-block teleport, new build teleports; a 5000-block teleport neither fails nor completes, shutdown not delayed | — | paper 0045 |
+| `/version`: old build "Unknown version" (compared with PaperMC/Folia), no startup check on Folia; new build with build number 15: "You are 2 version(s) behind" with the Tessera releases link, and "Currently you are 2 builds behind" after Done, T-062 | — | 0085 / paper 0046 |

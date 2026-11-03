@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Tue, 3 Nov 2026 11:10:09 +0300
+Subject: [PATCH] Run the startup version check on Folia
+
+The check runs after "Done" in the vanilla tick loop, which Folia never
+enters, so a server never logged that it was behind. Run it in the
+Folia startup path.
+
+diff --git a/net/minecraft/server/MinecraftServer.java b/net/minecraft/server/MinecraftServer.java
+index 3efd6fdf76015d5ac07df309eaaee49c3682ec80..513cfb97b84ed80011ffdd0502c4f93a98c06da0 100644
+--- a/net/minecraft/server/MinecraftServer.java
++++ b/net/minecraft/server/MinecraftServer.java
+@@ -1365,6 +1365,11 @@ public abstract class MinecraftServer extends ReentrantBlockableEventLoop<TickTa
+                 this.isReady = true; // Tessera - management server on Folia, the vanilla tick loop that sets it does not run
+                 final long actualDoneTimeMs = System.currentTimeMillis() - org.bukkit.craftbukkit.Main.BOOT_TIME.toEpochMilli(); // Paper - Improve startup message
+                 LOGGER.info("Done ({})! For help, type \"help\"", String.format(java.util.Locale.ROOT, "%.3fs", actualDoneTimeMs / 1000.00D)); // Paper - Improve startup message
++                // Tessera start - startup version check, the vanilla tick loop that runs it does not run on Folia
++                if (System.getProperty("paper.disableStartupVersionCheck") == null && io.papermc.paper.configuration.GlobalConfiguration.get().updateChecker.enabled) {
++                    CompletableFuture.runAsync(com.destroystokyo.paper.PaperVersionFetcher::getUpdateStatusStartupMessage, io.papermc.paper.util.MCUtil.ASYNC_EXECUTOR);
++                }
++                // Tessera end - startup version check, the vanilla tick loop that runs it does not run on Folia
+                 for (;;) {
+                     try {
+                         Thread.sleep(Long.MAX_VALUE);

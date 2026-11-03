@@ -1,0 +1,96 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Tue, 3 Nov 2026 11:07:22 +0300
+Subject: [PATCH] Check the version against Tessera releases
+
+/version and the startup check compared a Tessera build number with
+Folia's builds on the PaperMC downloads API, and a commit with the
+PaperMC/Folia repository, which gave "Unknown version". Count the
+GitHub releases of denfry/tessera for the same Minecraft version with a
+higher build number, compare commits with denfry/tessera, link its
+releases page and skip the Folia Minecraft version check.
+
+diff --git a/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java b/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
+index 30815c8970b1f1c88a3c7bb5fd36efd915f1687d..bd5678a87fc920f98a5d3d10f6544cff5553616f 100644
+--- a/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
++++ b/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
+@@ -40,10 +40,10 @@ public class PaperVersionFetcher implements VersionFetcher {
+     private static final ComponentLogger COMPONENT_LOGGER = ComponentLogger.logger(LogManager.getRootLogger().getName());
+     private static final int DISTANCE_ERROR = -1;
+     private static final int DISTANCE_UNKNOWN = -2;
+-    private static final String DOWNLOAD_PAGE = "https://papermc.io/downloads/folia"; // Folia
+-    private static final String REPOSITORY = "PaperMC/Folia"; // Folia
++    private static final String DOWNLOAD_PAGE = "https://github.com/denfry/tessera/releases"; // Folia // Tessera - Tessera releases
++    private static final String REPOSITORY = "denfry/tessera"; // Folia // Tessera - Tessera releases
+     private static final ServerBuildInfo BUILD_INFO = ServerBuildInfo.buildInfo();
+-    private static final String USER_AGENT = BUILD_INFO.brandName() + "/" + BUILD_INFO.asString(VERSION_SIMPLE) + " (https://papermc.io)";
++    private static final String USER_AGENT = BUILD_INFO.brandName() + "/" + BUILD_INFO.asString(VERSION_SIMPLE) + " (https://github.com/denfry/tessera)"; // Tessera - Tessera releases
+     private static final Gson GSON = new Gson();
+ 
+     @Override
+@@ -137,6 +137,7 @@ public class PaperVersionFetcher implements VersionFetcher {
+     private record MinecraftVersionFetcher(String latestVersion, int distance) {}
+ 
+     private static Optional<MinecraftVersionFetcher> fetchMinecraftVersionList() {
++        if (true) return Optional.empty(); // Tessera - Folia's Minecraft versions say nothing about Tessera builds
+         final String currentVersion = PaperVersionFetcher.BUILD_INFO.minecraftVersionId();
+ 
+         try {
+@@ -199,6 +200,7 @@ public class PaperVersionFetcher implements VersionFetcher {
+     }
+ 
+     private static int fetchDistanceFromSiteApi(final int jenkinsBuild) {
++        if (true) return fetchDistanceFromTesseraReleases(jenkinsBuild); // Tessera - Tessera releases
+         try {
+             final URL buildsUrl = URI.create("https://fill.papermc.io/v3/projects/folia/versions/" + PaperVersionFetcher.BUILD_INFO.minecraftVersionId() + "/builds").toURL(); // Folia
+             final HttpURLConnection connection = (HttpURLConnection) buildsUrl.openConnection();
+@@ -223,6 +225,49 @@ public class PaperVersionFetcher implements VersionFetcher {
+         }
+     }
+ 
++    // Tessera start - Tessera releases
++    // Every push to main publishes a GitHub release tagged <minecraft version>-build.<build number>. The distance is
++    // the number of releases for the same Minecraft version with a higher build number.
++    private static int fetchDistanceFromTesseraReleases(final int build) {
++        final String prefix = PaperVersionFetcher.BUILD_INFO.minecraftVersionId() + "-build.";
++        try {
++            final HttpURLConnection connection = (HttpURLConnection) URI.create("https://api.github.com/repos/%s/releases?per_page=100".formatted(PaperVersionFetcher.REPOSITORY)).toURL().openConnection();
++            connection.setConnectTimeout(5000);
++            connection.setReadTimeout(5000);
++            connection.setRequestProperty("User-Agent", PaperVersionFetcher.USER_AGENT);
++            connection.setRequestProperty("Accept", "application/vnd.github+json");
++            try (final BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
++                final JsonArray releases = GSON.fromJson(reader, JsonArray.class);
++                int newer = 0;
++                for (final JsonElement element : releases) {
++                    final JsonObject release = element.getAsJsonObject();
++                    if (release.has("draft") && release.get("draft").getAsBoolean()) {
++                        continue;
++                    }
++                    final String tag = release.get("tag_name").getAsString();
++                    if (!tag.startsWith(prefix)) {
++                        continue;
++                    }
++                    try {
++                        if (Integer.parseInt(tag.substring(prefix.length())) > build) {
++                            ++newer;
++                        }
++                    } catch (final NumberFormatException ignored) {
++                        // not a build tag
++                    }
++                }
++                return newer;
++            } catch (final JsonSyntaxException | IllegalStateException | NullPointerException ex) {
++                LOGGER.error("Error parsing json from GitHub's API", ex);
++                return DISTANCE_ERROR;
++            }
++        } catch (final IOException e) {
++            LOGGER.error("Error while fetching Tessera releases", e);
++            return DISTANCE_ERROR;
++        }
++    }
++    // Tessera end - Tessera releases
++
+     // Contributed by Techcable <Techcable@outlook.com> in GH-65
+     private static int fetchDistanceFromGitHub(final String branch, final String hash) {
+         try {
