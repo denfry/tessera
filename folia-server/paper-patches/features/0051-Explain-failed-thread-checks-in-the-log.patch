@@ -1,0 +1,211 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 5 Nov 2026 14:22:39 +0300
+Subject: [PATCH] Explain failed thread checks in the log
+
+A failed thread check logs only the reason, the thread and the
+position, and server owners cannot tell which plugin is at fault or
+what it should do instead. Add a line to the log message with the
+plugin and the method it called, the kind of thread (global region,
+another region, no region), and the Folia API to use for blocks and
+chunks or for entities. For plugins in compatibility mode it says why
+the region loan did not apply. Without a plugin on the stack it asks
+for a report. The exception message is unchanged. The thread context
+names the global region instead of {null}.
+
+diff --git a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+index 0b074171753a0581c9cfa592012e410586f87dda..a18f84e76c4276aa0200c68c11a8ab20ac0d372d 100644
+--- a/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
++++ b/src/main/java/ca/spottedleaf/moonrise/common/util/TickThread.java
+@@ -39,7 +39,7 @@ public class TickThread extends Thread {
+             return "[thread=" + thread + ",class=" + thread.getClass().getName() + "]";
+         }
+ 
+-        return "[thread=" + thread.getName() + ",class=" + thread.getClass().getName() + ",region=" + getRegionInfo(TickRegionScheduler.getCurrentRegion()) + "]";
++        return "[thread=" + thread.getName() + ",class=" + thread.getClass().getName() + ",region=" + (RegionizedServer.isGlobalTickThread() ? "global" : getRegionInfo(TickRegionScheduler.getCurrentRegion())) + "]"; // Tessera - name the global region
+ 
+     }
+ 
+@@ -49,7 +49,7 @@ public class TickThread extends Thread {
+     @Deprecated
+     public static void ensureTickThread(final String reason) {
+         if (!isTickThread()) {
+-            LOGGER.error("Thread failed main thread check: " + reason + ", context=" + getThreadContext(), new Throwable());
++            LOGGER.error("Thread failed main thread check: " + reason + ", context=" + getThreadContext() + io.papermc.paper.threadedregions.TesseraThreadCheckHint.hint(io.papermc.paper.threadedregions.TesseraThreadCheckHint.Target.UNKNOWN), new Throwable()); // Tessera - explain failed thread checks
+             io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(reason); // Tessera - compatibility report
+             throw new IllegalStateException(reason);
+         }
+@@ -59,7 +59,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, pos) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, pos.getX() >> 4, pos.getZ() >> 4) && isTickThreadFor(world, pos))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                                reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex + io.papermc.paper.threadedregions.TesseraThreadCheckHint.hint(io.papermc.paper.threadedregions.TesseraThreadCheckHint.Target.WORLD), new Throwable()); // Tessera - explain failed thread checks
+             io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+@@ -69,7 +69,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, pos, blockRadius) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, pos.getX() >> 4, pos.getZ() >> 4) && isTickThreadFor(world, pos, blockRadius))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + pos + ", block_radius=" + blockRadius;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex + io.papermc.paper.threadedregions.TesseraThreadCheckHint.hint(io.papermc.paper.threadedregions.TesseraThreadCheckHint.Target.WORLD), new Throwable()); // Tessera - explain failed thread checks
+             io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+@@ -79,7 +79,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, pos) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, pos.x(), pos.z()) && isTickThreadFor(world, pos))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + pos;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex + io.papermc.paper.threadedregions.TesseraThreadCheckHint.hint(io.papermc.paper.threadedregions.TesseraThreadCheckHint.Target.WORLD), new Throwable()); // Tessera - explain failed thread checks
+             io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+@@ -89,7 +89,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, chunkX, chunkZ) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, chunkX, chunkZ) && isTickThreadFor(world, chunkX, chunkZ))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", chunk_pos=" + new ChunkPos(chunkX, chunkZ);
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex + io.papermc.paper.threadedregions.TesseraThreadCheckHint.hint(io.papermc.paper.threadedregions.TesseraThreadCheckHint.Target.WORLD), new Throwable()); // Tessera - explain failed thread checks
+             io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+@@ -99,7 +99,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(entity) && !(entity != null && io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(entity.level(), entity.chunkPosition().x(), entity.chunkPosition().z()) && isTickThreadFor(entity))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", entity=" + EntityUtil.dumpEntity(entity);
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex + io.papermc.paper.threadedregions.TesseraThreadCheckHint.hint(io.papermc.paper.threadedregions.TesseraThreadCheckHint.Target.ENTITY), new Throwable()); // Tessera - explain failed thread checks
+             io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+@@ -109,7 +109,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, aabb) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, CoordinateUtils.getChunkCoordinate(aabb.minX), CoordinateUtils.getChunkCoordinate(aabb.minZ)) && isTickThreadFor(world, aabb))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", aabb=" + aabb;
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex + io.papermc.paper.threadedregions.TesseraThreadCheckHint.hint(io.papermc.paper.threadedregions.TesseraThreadCheckHint.Target.WORLD), new Throwable()); // Tessera - explain failed thread checks
+             io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+@@ -119,7 +119,7 @@ public class TickThread extends Thread {
+         if (!isTickThreadFor(world, blockX, blockZ) && !(io.papermc.paper.threadedregions.TesseraRegionLoan.borrow(world, CoordinateUtils.getChunkCoordinate(blockX), CoordinateUtils.getChunkCoordinate(blockZ)) && isTickThreadFor(world, blockX, blockZ))) { // Tessera - region loans for plugins in compatibility mode
+             final String ex = "Thread failed main thread check: " +
+                 reason + ", context=" + getThreadContext() + ", world=" + WorldUtil.getWorldName(world) + ", block_pos=" + new Vec3(blockX, 0.0, blockZ);
+-            LOGGER.error(ex, new Throwable());
++            LOGGER.error(ex + io.papermc.paper.threadedregions.TesseraThreadCheckHint.hint(io.papermc.paper.threadedregions.TesseraThreadCheckHint.Target.WORLD), new Throwable()); // Tessera - explain failed thread checks
+             io.papermc.paper.threadedregions.TesseraCompatReport.threadCheckFailed(ex); // Tessera - compatibility report
+             throw new IllegalStateException(ex);
+         }
+diff --git a/src/main/java/io/papermc/paper/threadedregions/TesseraThreadCheckHint.java b/src/main/java/io/papermc/paper/threadedregions/TesseraThreadCheckHint.java
+new file mode 100644
+index 0000000000000000000000000000000000000000..8f8d09d23377cd304dd441d15b5ddebcc0d676e7
+--- /dev/null
++++ b/src/main/java/io/papermc/paper/threadedregions/TesseraThreadCheckHint.java
+@@ -0,0 +1,105 @@
++package io.papermc.paper.threadedregions;
++
++import ca.spottedleaf.moonrise.common.util.TickThread;
++import io.papermc.paper.plugin.provider.classloader.ConfiguredPluginClassLoader;
++import org.bukkit.plugin.Plugin;
++
++/**
++ * Explains a failed thread check in the log: which plugin made the call, on which kind of thread, and which Folia
++ * API to use instead. The exception itself keeps the upstream message.
++ */
++public final class TesseraThreadCheckHint {
++
++    public enum Target {
++        /** A block, chunk or area of a world. */
++        WORLD,
++        /** An entity. */
++        ENTITY,
++        /** No position known. */
++        UNKNOWN
++    }
++
++    private static final StackWalker STACK_WALKER = StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
++    private static final String ISSUES = "https://github.com/denfry/tessera/issues";
++
++    private TesseraThreadCheckHint() {
++    }
++
++    private record Caller(Plugin plugin, String method) {
++    }
++
++    private static Caller findCaller() {
++        return STACK_WALKER.walk(frames -> {
++            StackWalker.StackFrame callee = null;
++            for (final StackWalker.StackFrame frame : (Iterable<StackWalker.StackFrame>) frames::iterator) {
++                if (frame.getDeclaringClass().getClassLoader() instanceof ConfiguredPluginClassLoader loader && loader.getPlugin() != null) {
++                    final String method = callee == null ? "?" : simpleName(callee.getClassName()) + "." + callee.getMethodName();
++                    return new Caller(loader.getPlugin(), method);
++                }
++                if (frame.getDeclaringClass() != TesseraThreadCheckHint.class && frame.getDeclaringClass() != TickThread.class) {
++                    callee = frame;
++                }
++            }
++            return null;
++        });
++    }
++
++    private static String simpleName(final String className) {
++        return className.substring(className.lastIndexOf('.') + 1);
++    }
++
++    private static String threadKind() {
++        if (RegionizedServer.isGlobalTickThread()) {
++            return "the global region thread";
++        }
++        if (TickRegionScheduler.getCurrentRegion() != null) {
++            return "the thread of another region";
++        }
++        return "a thread that owns no region (" + Thread.currentThread().getName() + ")";
++    }
++
++    private static String advice(final Target target) {
++        return switch (target) {
++            case WORLD -> " Blocks and chunks belong to the region that owns their location: run the code with"
++                + " Bukkit.getRegionScheduler().run(plugin, location, task), and load chunks with World#getChunkAtAsync.";
++            case ENTITY -> " An entity belongs to the region it is in: run the code with entity.getScheduler().run(plugin, task, null),"
++                + " and move entities with Entity#teleportAsync.";
++            case UNKNOWN -> " Run it on the thread that owns the state: Bukkit.getGlobalRegionScheduler() for server-wide state,"
++                + " the region or entity scheduler for world state.";
++        };
++    }
++
++    /**
++     * Returns text to append to the log line of a failed thread check, starting with a line break. Never throws.
++     */
++    public static String hint(final Target target) {
++        try {
++            final Caller caller = findCaller();
++            final StringBuilder builder = new StringBuilder("\nTessera: ");
++            if (caller == null) {
++                builder.append("no plugin on the stack, called on ").append(threadKind()).append('.')
++                    .append(" If this is not caused by a plugin, report it with this log: ").append(ISSUES);
++                return builder.toString();
++            }
++            final Plugin plugin = caller.plugin();
++            final boolean compat = TesseraCompat.isCompat(plugin);
++            builder.append(plugin.getName()).append(' ').append(plugin.getPluginMeta().getVersion())
++                .append(compat ? " (compatibility mode)" : " (supports Folia)")
++                .append(" called ").append(caller.method()).append(" on ").append(threadKind()).append('.');
++            if (compat) {
++                if (RegionizedServer.isGlobalTickThread()) {
++                    builder.append(" Region loans did not help here: the call is outside a BukkitScheduler or global task or command of the plugin, or the region could not be taken in time.");
++                } else {
++                    builder.append(" Plugins in compatibility mode borrow regions only from sync scheduler tasks and commands, not from event handlers or async tasks.");
++                }
++                builder.append(" See /tessera compat ").append(plugin.getName()).append('.');
++            } else {
++                builder.append(advice(target)).append(" This is a bug in the plugin; report it to its author.");
++            }
++            return builder.toString();
++        } catch (final Throwable ignored) {
++            // the hint must never replace the exception of the thread check
++            return "";
++        }
++    }
++}
