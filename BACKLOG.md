@@ -156,14 +156,6 @@ by an option and only for listed plugins. Plugins written against the Folia API 
   that reaches `execute` fails loudly today, a queue on the global thread would turn that into silent off-region writes, and FAWE
   still writes chunks from its own threads. WorldEdit supports Folia.
 
-#### T-216 PaperLib in plugins cannot detect 26.x
-- **Why.** PaperLib parses `1.<minor>` out of the server version. On 26.x it treats the server as Spigot and turns
-  `getChunkAtAsync` into a sync `World#getChunkAt`. BetterRTP 3.6.8 (`folia-supported: true`) calls it from a global
-  task: `IllegalStateException: Async chunk retrieval` and `/rtp` never teleports. Folia 26.x has the same problem.
-- **What.** First report it to PaperLib and BetterRTP. On our side, check whether anything short of faking the version
-  string helps (for example, `getChunkAt` from a global task of such a plugin turning into a loan as in T-103d).
-- **Done when.** BetterRTP `/rtp` teleports on Tessera, or PLUGINS.md links the upstream fix.
-
 ### B. Lag attribution (T-110)
 
 Builds on T-003 (per-region report and MBean).
@@ -306,3 +298,4 @@ Folia regions are already isolated, the next step is spreading them across proce
 | `/tessera lag`: 2 bots in 2 regions, 75 hoppers next to one; report lists both regions by MSPT with entity and block entity types (75 hopper) and the busiest chunk. Over RCON the answer comes after the command returns (collected on the region threads), T-113 | — | paper 0047 |
 | Spike detector, threshold 200 ms: a plugin task busy for 350 ms in a region and 250 ms on the global region gives two reports with `heavyPluginWork` as the top frame; a second region spike 2 s later is skipped (cooldown); no errors, T-115 | — | 0087 / paper 0048 |
 | Global tasks of compatibility-mode plugins borrow regions (T-215): a probe plugin in compatibility mode reads blocks under 2 bots in 2 regions from a `GlobalRegionScheduler` task, failing on build.18 and clean now; ExcellentEnchants 5.4.3 (nightcore) gave 51 `failed global` in 60 s on build.18, none now; the same probe marked `folia-supported` still fails the check | — | paper 0049 |
+| PaperLib reads 26.x versions (T-216): its version pattern in plugin classes is rewritten at load, so it uses the async Paper API instead of sync chunk loads and teleports. BetterRTP 3.6.8: on build.18 its queue never fills and `rtp player` fails the thread check; now the queue fills and two console `rtp player` calls teleport the bot, no errors. EssentialsX (also shades PaperLib): `/sethome`, `/spawn`, `/home`, `/back`, `/tpa` + `/tpaccept` and console `/tp` between regions, no errors. PaperLib is archived upstream; BetterRTP issue: RonanPlugins/BetterRTP#257 | — | paper 0050 |

@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 5 Nov 2026 13:48:06 +0300
+Subject: [PATCH] Let PaperLib read 26.x versions
+
+PaperLib, shaded by many plugins and archived upstream, reads the
+version from "(MC: 1.21.4)" with a pattern that expects one digit
+before the first dot. "(MC: 26.3)" does not match, so it treats the
+server as Spigot and calls sync World#getChunkAt and Entity#teleport.
+On Folia these fail off the owning region; BetterRTP never teleports.
+
+Rewrite the version pattern constant in plugin classes, as the MySQL
+driver name already is, so that it reads 26 as the minor version and
+PaperLib uses the async Paper API again.
+
+diff --git a/src/main/java/org/bukkit/craftbukkit/util/Commodore.java b/src/main/java/org/bukkit/craftbukkit/util/Commodore.java
+index 172fdec7c41c2dcd028979c7387371fbc754d0d3..54b735e7719e3802ff85c679aeb893d59441d8cd 100644
+--- a/src/main/java/org/bukkit/craftbukkit/util/Commodore.java
++++ b/src/main/java/org/bukkit/craftbukkit/util/Commodore.java
+@@ -72,6 +72,14 @@ public class Commodore {
+             "java/util/EnumMap", "org/bukkit/craftbukkit/legacy/enums/ImposterEnumMap"
+     );
+ 
++    // Tessera start - PaperLib cannot parse 26.x versions
++    // PaperLib (archived) reads the version from "(MC: 1.21.4)" as major digit, minor, patch, and takes the minor as the
++    // version. "(MC: 26.3)" does not match, so it falls back to the sync Spigot path, and sync chunk loads off the owning
++    // region fail. The replacement keeps the group numbers and reads 26 as the minor version.
++    private static final String PAPERLIB_VERSION_PATTERN = "\\(MC: (\\d)\\.(\\d+)\\.?(\\d+?)?";
++    private static final String PAPERLIB_VERSION_PATTERN_26 = "\\(MC: ()(\\d+)\\.?(\\d+)?(?:\\.\\d+)?";
++    // Tessera end - PaperLib cannot parse 26.x versions
++
+     private static final Map<String, String> RENAMES = Map.of(
+             "org/bukkit/entity/TextDisplay$TextAligment", "org/bukkit/entity/TextDisplay$TextAlignment", // SPIGOT-7335
+             "org/spigotmc/event/entity/EntityMountEvent", "org/bukkit/event/entity/EntityMountEvent",
+@@ -559,6 +567,12 @@ public class Commodore {
+                             super.visitLdcInsn("com.mysql.cj.jdbc.Driver");
+                             return;
+                         }
++                        // Tessera start - PaperLib cannot parse 26.x versions
++                        if (value instanceof String string && string.contains(Commodore.PAPERLIB_VERSION_PATTERN)) {
++                            super.visitLdcInsn(string.replace(Commodore.PAPERLIB_VERSION_PATTERN, Commodore.PAPERLIB_VERSION_PATTERN_26));
++                            return;
++                        }
++                        // Tessera end - PaperLib cannot parse 26.x versions
+ 
+                         super.visitLdcInsn(value);
+                     }
