@@ -139,7 +139,8 @@ task loads a new chunk next to a taken region and far from everything (up to 1 s
 No errors.
 
 - **T-103a.** Skipping the tick of a loaned region in the scheduler. Loan, context and release. Entry in
-  `ensureTickThread` for position, chunk and entity. Scope — sync `BukkitScheduler` tasks.
+  `ensureTickThread` for position, chunk and entity. Scope — sync `BukkitScheduler` tasks, and `GlobalRegionScheduler` tasks of
+  compat-mode plugins (T-215: libraries such as nightcore detect Folia and use its schedulers).
   Check: a plugin task modifies blocks in two distant regions, damages an entity, reads blocks. The server with
   bots in these regions keeps running, no errors in the log.
 - **T-103b.** Compat-mode plugin commands (from the console and from players) run on the global thread in the
