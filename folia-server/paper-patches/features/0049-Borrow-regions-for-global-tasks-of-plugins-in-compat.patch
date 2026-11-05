@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: denfry <dabinayo@pm.me>
+Date: Thu, 5 Nov 2026 13:04:31 +0300
+Subject: [PATCH] Borrow regions for global tasks of plugins in compatibility
+ mode
+
+Plugins in compatibility mode borrow the regions they touch only from
+BukkitScheduler tasks and commands. Some of them, or libraries they
+shade, detect Folia and use the GlobalRegionScheduler instead, and then
+touch entities in every region from the global thread and fail the
+thread checks. Run global tasks of plugins in compatibility mode in a
+loan scope as well. Tasks of plugins that support Folia are unchanged.
+
+diff --git a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+index c78e3152b695fb19e035987efb3e67b3b97eebdb..5d47e323db3b5fe2edc7f04641fa1a90a070f764 100644
+--- a/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
++++ b/src/main/java/io/papermc/paper/threadedregions/scheduler/FoliaGlobalRegionScheduler.java
+@@ -184,7 +184,13 @@ public class FoliaGlobalRegionScheduler implements GlobalRegionScheduler {
+             }
+ 
+             try {
++                // Tessera start - global tasks of plugins in compatibility mode borrow the regions they touch
++                if (io.papermc.paper.threadedregions.TesseraCompat.enabled() && io.papermc.paper.threadedregions.TesseraCompat.isCompat(this.plugin)) {
++                    io.papermc.paper.threadedregions.TesseraRegionLoan.runInScope(() -> this.run.accept(this));
++                } else {
+                 this.run.accept(this);
++                }
++                // Tessera end - global tasks of plugins in compatibility mode borrow the regions they touch
+             } catch (final Throwable throwable) {
+                 this.plugin.getLogger().log(Level.WARNING, "Global task for " + this.plugin.getDescription().getFullName() + " generated an exception", throwable);
+             } finally {
